@@ -1,0 +1,9 @@
+generated
+
+*__pycache__/
+.idea
+
+*.egg
+*.egg-info
+
+*.DS_Store
