@@ -2,12 +2,12 @@
 
 # My imports
 from guitar_transcription_inhibition.metrics import FalseAlarmErrors
-from yousician_private import SyntheticGuitar_V0
-from amt_tools.datasets import GuitarSet
+from yousician_private import SyntheticGuitar_V1
+from GuitarSet import GuitarSet
 from amt_tools.models import TabCNN
 from amt_tools.features import CQT
 
-from amt_tools.train import train, validate
+from amt_tools.train import train
 from amt_tools.transcribe import *
 from amt_tools.evaluate import *
 
@@ -21,9 +21,9 @@ from sacred import Experiment
 import torch
 import os
 
-EX_NAME = '_'.join(['TabCNN_SynthV0_Benchmark'])
+EX_NAME = '_'.join(['TabCNN_SynthV0_Benchmark_4'])
 
-ex = Experiment('Tablature Transcription Trained on Synthetic Data Evaluated on GuitarSet')
+ex = Experiment('Tablature Transcription Trained on Synthetic Data Evaluated on Synthetic Data')
 
 
 @ex.config
@@ -35,13 +35,13 @@ def config():
     hop_length = 512
 
     # Number of consecutive frames within each example fed to the model
-    num_frames = 150
+    num_frames = 200
 
     # Number of training iterations to conduct
-    iterations = 50000
+    iterations = 500
 
     # How many equally spaced save/validation checkpoints - 0 to disable
-    checkpoints = 250
+    checkpoints = 25
 
     # Number of samples to gather for a batch
     batch_size = 50
@@ -63,7 +63,8 @@ def config():
     seed = 0
 
     # Create the root directory for the experiment to hold train/transcribe/evaluate materials
-    root_dir = os.path.join('..', 'generated', 'experiments', EX_NAME)
+    #root_dir = os.path.join('..', 'generated', 'experiments', EX_NAME)
+    root_dir = os.path.join(tools.DEFAULT_EXPERIMENTS_DIR, EX_NAME)
     os.makedirs(root_dir, exist_ok=True)
 
     # Add a file storage observer for the log directory
@@ -88,17 +89,19 @@ def experiment(sample_rate, hop_length, num_frames, iterations, checkpoints,
                     bins_per_octave=24)
 
     # Initialize the estimation pipeline
-    validation_estimator = ComboEstimator([TablatureWrapper(profile=profile)])
+    validation_estimator = ComboEstimator([TablatureWrapper(profile=profile),
+                                           NoteTranscriber(profile=profile)])
 
     # Initialize the evaluation pipeline
     validation_evaluator = ComboEvaluator([LossWrapper(),
                                            MultipitchEvaluator(),
                                            TablatureEvaluator(profile=profile),
                                            FalseAlarmErrors(profile=profile),
-                                           SoftmaxAccuracy(key=tools.KEY_TABLATURE)])
+                                           SoftmaxAccuracy(key=tools.KEY_TABLATURE),
+                                           NoteEvaluator(key=tools.KEY_NOTE_ON)])
 
     # Keep all cached data/features here
-    gset_cache = os.path.join('..', 'generated', 'data')
+    data_cache = os.path.join('..', 'generated', 'data')
 
     # Initialize an empty dictionary to hold the average results across fold
     results = dict()
@@ -109,7 +112,8 @@ def experiment(sample_rate, hop_length, num_frames, iterations, checkpoints,
     print('Loading training partition...')
 
     # Create a dataset corresponding to the training partition
-    synth_train = SyntheticGuitar_V0(base_dir=None,
+    synth_train = SyntheticGuitar_V1(base_dir=None,
+                                     splits=['train'],
                                      hop_length=hop_length,
                                      sample_rate=sample_rate,
                                      num_frames=num_frames,
@@ -117,26 +121,37 @@ def experiment(sample_rate, hop_length, num_frames, iterations, checkpoints,
                                      profile=profile,
                                      store_data=False,
                                      save_data=True,
-                                     save_loc=gset_cache)
+                                     save_loc=data_cache)
 
     # Create a PyTorch data loader for the dataset
     train_loader = DataLoader(dataset=synth_train,
                               batch_size=batch_size,
                               shuffle=True,
-                              num_workers=0,
+                              num_workers=8,
                               drop_last=True)
 
     print(f'Loading testing partition...')
 
     # Create a dataset corresponding to the testing partition
-    gset_test = GuitarSet(base_dir=None,
+    """gset_test = GuitarSet(base_dir=None,
                           hop_length=hop_length,
                           sample_rate=sample_rate,
                           num_frames=None,
                           data_proc=data_proc,
                           profile=profile,
                           store_data=True,
-                          save_loc=gset_cache)
+                          save_data=False,
+                          save_loc=data_cache)"""
+    synth_test = SyntheticGuitar_V1(base_dir=None,
+                                    splits=['test'],
+                                    hop_length=hop_length,
+                                    sample_rate=sample_rate,
+                                    num_frames=None,
+                                    data_proc=data_proc,
+                                    profile=profile,
+                                    store_data=True,
+                                    save_data=False,
+                                    save_loc=data_cache)
 
     print('Initializing model...')
 
@@ -158,7 +173,7 @@ def experiment(sample_rate, hop_length, num_frames, iterations, checkpoints,
     model_dir = os.path.join(root_dir, 'models')
 
     # Set validation patterns for training
-    validation_evaluator.set_patterns(['loss', 'f1', 'tdr', 'acc', 'error'])
+    #validation_evaluator.set_patterns(['loss', 'f1', 'tdr', 'acc', 'error'])
 
     # Train the model
     tabcnn = train(model=tabcnn,
@@ -167,7 +182,7 @@ def experiment(sample_rate, hop_length, num_frames, iterations, checkpoints,
                    iterations=iterations,
                    checkpoints=checkpoints,
                    log_dir=model_dir,
-                   val_set=gset_test,
+                   val_set=synth_test,
                    estimator=validation_estimator,
                    evaluator=validation_evaluator)
 
@@ -178,7 +193,7 @@ def experiment(sample_rate, hop_length, num_frames, iterations, checkpoints,
     validation_evaluator.set_patterns(None)
 
     # Get the average results for the fold
-    fold_results = validate(tabcnn, gset_test, evaluator=validation_evaluator, estimator=validation_estimator)
+    fold_results = validate(tabcnn, synth_test, evaluator=validation_evaluator, estimator=validation_estimator)
 
     # Add the results to the tracked fold results
     results = append_results(results, fold_results)
