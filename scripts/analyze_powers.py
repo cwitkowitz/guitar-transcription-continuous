@@ -16,6 +16,11 @@ import numpy as np
 import random
 import os
 
+# Number of tracks to use randomly (None for all)
+N = 200
+# Which type of ground-truth to analyze ('onsets' | 'tablature')
+frame_type = tools.KEY_ONSETS
+
 # Processing parameters
 sample_rate = 22050
 hop_length = 512
@@ -46,23 +51,19 @@ tablature_data = SyntheticGuitar_V1(base_dir=None,
                                     store_data=False,
                                     save_data=False)
 
-# Shuffle the track ordering
-#random.shuffle(tablature_data.tracks)
-# Trim the dataset to 200 random tracks
-#tablature_data.tracks = tablature_data.tracks[:200]
-# TODO - remove
-tablature_data.tracks = [tablature_data.tracks[4]]
+if N is not None:
+    # Shuffle the track ordering
+    random.shuffle(tablature_data.tracks)
+    # Trim the dataset to N random tracks
+    tablature_data.tracks = tablature_data.tracks[:N]
 
 # Create a dictionary with an empty array for each level of polyphony
 powers = dict.fromkeys(range(7), np.array([]))
 
 # Loop through each track in the tablature data
 for track in tqdm(tablature_data):
-    # TODO - remove
-    track_name = track[tools.KEY_TRACK]
     # Determine the number of active strings (from ground-truth) in each frame
-    num_active_strings = np.sum(track[tools.KEY_ONSETS] != -1, axis=-2)
-    #num_active_strings = np.sum(track[tools.KEY_TABLATURE] != -1, axis=-2)
+    num_active_strings = np.sum(track[frame_type] != -1, axis=-2)
     # Loop through each level of polyphony
     for polyphony in range(7):
         # Obtain the powers for each frame in the track matching the polyphony
@@ -103,7 +104,11 @@ plt.setp(ax[:], ylabel='Count')
 # Adjust sizes so subplot titles do not overlap with axes
 fig.tight_layout(rect=[0, 0.03, 1, 0.95])
 
+# Construct the file name based off of processing parameters
+file_name = f'{tablature_data.dataset_name()}'
+if N is not None:
+    file_name += f'-{N}'
+file_name += f'-{frame_type}.jpg'
+
 # Save the plot as a figure
-#fig.savefig(os.path.join(save_dir, f'{tablature_data.dataset_name()}-onsets.jpg'), bbox_inches='tight')
-# TODO - remove
-fig.savefig(os.path.join(save_dir, f'{track_name}-onsets.jpg'), bbox_inches='tight')
+fig.savefig(os.path.join(save_dir, file_name), bbox_inches='tight')
