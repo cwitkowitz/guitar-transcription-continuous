@@ -5,7 +5,6 @@ from amt_tools.features import WaveformWrapper
 
 # Regular imports
 from librosa.core import amplitude_to_db
-from librosa.util import frame
 
 import numpy as np
 
@@ -29,34 +28,6 @@ class SignalPower(WaveformWrapper):
                          win_length=win_length,
                          center=center)
 
-    def _pad_audio(self, audio):
-        """
-        Pad audio such that trailing audio can be used.
-
-        Parameters
-        ----------
-        audio : ndarray
-          Mono-channel audio
-
-        Returns
-        ----------
-        audio : ndarray
-          Audio padded such that it will not throw away non-zero samples
-        """
-
-        # Handle the centered frame case
-        if self.center and not audio.shape[-1] == 0:
-            # TODO - make this part of waveform wrapper and
-            #        have no padding in child transforms?
-            # Compute the padding which would occur in (librosa) STFT
-            padding = [tuple([int(self.win_length // 2)] * 2)]
-            # Pad the signal on both sides
-            audio = np.pad(audio, padding, mode='constant')
-        else:
-            audio = super()._pad_audio(audio)
-
-        return audio
-
     def process_audio(self, audio):
         """
         Get the signal power for each frame of a piece of audio.
@@ -72,12 +43,9 @@ class SignalPower(WaveformWrapper):
           Frame-level signal powers
         """
 
-        # Pad the audio
-        audio = self._pad_audio(audio)
-        # Obtain the audio samples associated with each frame
-        audio_frames = frame(audio,
-                             frame_length=self.win_length,
-                             hop_length=self.hop_length)
+        # Split the audio into frames
+        audio_frames = super().process_audio(audio)
+
         # Compute frame-level signal powers
         powers = np.sum(audio_frames ** 2, axis=-2) / self.win_length
 
