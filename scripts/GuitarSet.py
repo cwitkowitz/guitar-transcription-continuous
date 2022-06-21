@@ -63,7 +63,9 @@ class GuitarSet(GuitarSet):
             data[tools.KEY_NOTES] = batched_notes
 
             # TODO - remove
+            # Obtain the onsets for each string from the stacked notes
             #stacked_onsets = tools.stacked_notes_to_stacked_onsets(stacked_notes, times, self.profile)
+            # Convert the onsets to tablature format
             #data[tools.KEY_ONSETS] = tools.stacked_multi_pitch_to_tablature(stacked_onsets, self.profile)
 
             if self.save_data:
