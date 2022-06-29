@@ -26,7 +26,7 @@ data_proc = SignalPower(sample_rate=sample_rate,
                         hop_length=hop_length,
                         decibels=True,
                         win_length=None,
-                        center=True)
+                        center=False)
 """data_proc = WaveformWrapper(sample_rate=sample_rate,
                             hop_length=hop_length,
                             decibels=True,
@@ -38,7 +38,6 @@ profile = tools.GuitarProfile(num_frets=19)
 
 # Instantiate the synthetic data with no normalization
 sample_data = SingleNotes(base_dir=None,
-                          #splits=['train', 'test'], TODO
                           hop_length=hop_length,
                           sample_rate=sample_rate,
                           num_frames=None,
@@ -51,7 +50,7 @@ sample_data = SingleNotes(base_dir=None,
 # Create a dictionary with an empty array for both inactive/active frame collections
 db_powers = dict.fromkeys(range(2), np.array([]))
 
-#sample_data.tracks = ['S_0xxxxx_correct/BlueYetiPro/EpiphoneLesPaulBlackBeautyCleanAmpHard_sthumb']
+sample_data.tracks = ['S_0xxxxx_correct/BlueYetiPro/EpiphoneLesPaulBlackBeautyCleanAmpHard_sthumb']
 
 # Loop through each sample in the collection
 for note in tqdm(sample_data):

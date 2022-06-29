@@ -1,7 +1,7 @@
 # Author: Frank Cwitkowitz <fcwitkow@ur.rochester.edu>
 
 # My imports
-from yousician_private import SyntheticGuitar_V1
+from yousician_private import SyntheticGuitar_V2
 from amt_tools.datasets import GuitarSet
 from power import SignalPower
 
@@ -15,6 +15,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 import os
+
+# TODO - make wrapper which additionally adds left-aligned times (at_start=True) to data
 
 # Number of tracks to use randomly (None for all)
 N = 200
@@ -40,8 +42,8 @@ data_proc = SignalPower(sample_rate=sample_rate,
 profile = tools.GuitarProfile(num_frets=19)
 
 # Instantiate the synthetic data with no normalization
-tablature_data = SyntheticGuitar_V1(base_dir=None,
-                                    splits=['train', 'test'],
+tablature_data = SyntheticGuitar_V2(base_dir=None,
+                                    splits=['train', 'val'],
                                     hop_length=hop_length,
                                     sample_rate=sample_rate,
                                     num_frames=None,
