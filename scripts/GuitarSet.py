@@ -65,6 +65,7 @@ class GuitarSet(GuitarSet):
             stacked_relative_multi_pitch = \
                 utils.stacked_streams_to_stacked_relative_multi_pitch(stacked_notes,
                                                                       stacked_pitch_list,
+                                                                      self.profile,
                                                                       semitone_width=1.5)
 
             # Collapse the stacked relative multi pitch array into a single representation
@@ -83,10 +84,8 @@ class GuitarSet(GuitarSet):
                 gt_path = self.get_gt_dir(track)
 
                 # Save the data as a NumPy zip file
-                keys = (tools.KEY_FS, tools.KEY_AUDIO,
-                        #tools.KEY_TABLATURE,
-                        tools.KEY_MULTIPITCH,
-                        constants.KEY_MULTIPITCH_REL, tools.KEY_NOTES)
+                keys = (tools.KEY_FS, tools.KEY_AUDIO, #tools.KEY_TABLATURE,
+                        tools.KEY_MULTIPITCH, constants.KEY_MULTIPITCH_REL, tools.KEY_NOTES)
                 tools.save_pack_npz(gt_path, keys, data[tools.KEY_FS], data[tools.KEY_AUDIO],
                                     #data[tools.KEY_TABLATURE],
                                     data[tools.KEY_MULTIPITCH],

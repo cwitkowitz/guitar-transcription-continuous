@@ -6,10 +6,10 @@ import numpy as np
 import warnings
 
 
-def monophonic_streams_to_relative_multi_pitch(notes, pitch_list, semitone_width=0.5):
+def monophonic_streams_to_relative_multi_pitch(notes, pitch_list, profile, semitone_width=0.5):
     """
     TODO - description
-    TODO - stress here that intervals should not overlap, e.g. monophonic notes
+    TODO - stress here that intervals should not overlap, but may roughly work for polyphonic data
 
     Parameters
     ----------
@@ -17,7 +17,7 @@ def monophonic_streams_to_relative_multi_pitch(notes, pitch_list, semitone_width
       pitches : ndarray (K)
         Array of pitches corresponding to notes in MIDI format
       intervals : ndarray (K x 2)
-        Array of onset-offset time pairs corresponding to notes
+        Array of onset-offset time pairs corresponding to (non-overlapping) notes
       (K - number of notes)
     pitch_list : tuple (times, pitch_list)
       pitch_list : list of ndarray (N x [...])
@@ -25,6 +25,8 @@ def monophonic_streams_to_relative_multi_pitch(notes, pitch_list, semitone_width
       times : ndarray (N)
         Time in seconds of beginning of each frame
       (N - number of pitch observations (frames))
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
     semitone_width : float
       Amount of deviation from nominal pitch supported
 
@@ -34,27 +36,142 @@ def monophonic_streams_to_relative_multi_pitch(notes, pitch_list, semitone_width
       Relative pitch deviations anchored to discrete pitches
       F - number of discrete pitches
       T - number of frames
+    adjusted_multi_pitch : ndarray (F x T)
+      Discrete pitch activation map corresponding to pitch list
+      F - number of discrete pitches
+      T - number of frames
     """
 
-    # Unpack the note attributes
-    pitches, intervals = notes
+    # Unpack the note attributes, making sure the notes are sorted by onset
+    pitches, intervals = tools.sort_notes(*notes, by=0)
+
+    # Flag to avoid throwing redundant warnings
+    warning_threw = False
+
+    # Check if there are any overlapping note intervals
+    if np.sum(np.diff(intervals.flatten()) < 0) > 0:
+        warnings.warn('Overlapping notes were provided. Will attempt ' +
+                      'to infer note-pitch groupings.', category=RuntimeWarning)
+        # Set the flag
+        warning_threw = True
+
     # Unpack the pitch list attributes
     times, pitch_list = pitch_list
 
-    relative_multi_pitch = None
+    # Check if any frames contain overlapping pitch observations
+    if np.sum([len(p) > 1 for p in pitch_list]) > 0 and not warning_threw:
+        warnings.warn('Ambiguous (overlapping) pitch contours were provided. ' +
+                      'Will attempt to infer note-pitch groupings.', category=RuntimeWarning)
 
-    # TODO - assume intervals do not overlap, e.g. monophonic notes
-    #        compute diff on flattened (sorted) intervals and ensure all positive (throw warning else)
-    # TODO - determine which frames correspond to each note
-    # TODO - drop frames with pitches (including 0) outside of the boundaries
-    #        imposed by the note's nominal midi pitch and the semitone width
-    # TODO - compute the deviation between the pitch of the remaining frames and the nominal value
-    # TODO - organize the deviations within a multi pitch array
+    # Determine the dimensionality for the multi pitch array
+    num_pitches = profile.get_range_len()
+    num_frames = len(pitch_list)
 
-    return relative_multi_pitch
+    # Initialize two empty multi pitch array for relative and adjusted multi pitch data
+    relative_multi_pitch = np.zeros((num_pitches, num_frames))
+    adjusted_multi_pitch = np.zeros((num_pitches, num_frames))
+
+    # Round note pitches to nearest semitone and subtract the lowest
+    # supported note of the instrument to obtain pitch indices
+    pitch_idcs = np.round(pitches - profile.low).astype(tools.INT)
+
+    # Determine if and where there are out-of-bounds notes
+    valid_idcs = np.logical_and((pitch_idcs >= 0), (pitch_idcs < num_pitches))
+
+    if np.sum(valid_idcs) != len(pitch_idcs):
+        # Print a warning message if notes were ignored
+        warnings.warn('Attempted to represent notes in multi-pitch array '
+                      'which exceed boundaries. These will be ignored.', category=RuntimeWarning)
+
+    # Remove any invalid (out-of-bounds) pitches
+    pitch_idcs, intervals, pitches = pitch_idcs[valid_idcs], intervals[valid_idcs], pitches[valid_idcs]
+
+    # Duplicate the array of times for each note and stack along a new axis
+    times = np.concatenate([[times]] * max(1, len(pitch_idcs)), axis=0)
+
+    # Determine the frame where each note begins and ends
+    onset_idcs = np.argmin((times <= intervals[..., :1]), axis=1) - 1
+    offset_idcs = np.argmin((times < intervals[..., 1:]), axis=1) - 1
+
+    # Loop through each note
+    for i in range(len(pitch_idcs)):
+        # Keep track of adjusted note boundaries without modifying original values
+        adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
+
+        # TODO - hypothetically, may fail if null pitch observations encoder as np.array([0.])
+
+        # Adjust the onset index to the first frame with non-empty pitch observations
+        while not len(pitch_list[adjusted_onset]) and adjusted_onset < adjusted_offset:
+            adjusted_onset += 1
+
+        # Adjust the offset index to the last frame with non-empty pitch observations
+        while not len(pitch_list[adjusted_offset]) and adjusted_offset > adjusted_onset:
+            adjusted_offset -= 1
+
+        # Check that there are non-empty pitch observations
+        if adjusted_onset != adjusted_offset and len(pitch_list[adjusted_onset]):
+            # Extract the (cropped) pitch observations within the note interval
+            pitch_observations = pitch_list[adjusted_onset: adjusted_offset + 1]
+        else:
+            # There are no non-empty pitch observations, throw a warning
+            warnings.warn('No pitch observations occur within the note interval. ' +
+                          'Inserting average pitch of note instead.', category=RuntimeWarning)
+            # Reset the interval to the original note boundaries
+            adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
+            # Populate the frames with the average pitch of the note
+            pitch_observations = [np.ndarray([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
+
+        # Populate the multi pitch array with adjusted activations for the note
+        adjusted_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = 1
+
+        # Check if there are any empty observations remaining
+        if np.sum([len(p) == 0 for p in pitch_observations]) > 0:
+            # TODO - can also check if array of gap indices has entries
+            # There are some gaps in the observations, throw a warning
+            warnings.warn('Missing pitch observations within note interval. ' +
+                          'Will attempt to interpolate gaps.', category=RuntimeWarning)
+
+        # Convert the cropped pitch list to an array of monophonic pitches, choosing
+        # the pitch closest to the nominal value of the note if a frame is polyphonic
+        # TODO - might want to do check for overlapping pitch observations and warning here instead
+        #        since it only really matters in the overlap occurs within a note interval
+        pitch_observations = np.array([p[np.argmin(np.abs(p - pitches[i]))]
+                                       if len(p) else 0. for p in pitch_observations])
+
+        # Determine which pitch observations occur directly before gaps
+        gap_onsets = np.append(np.diff((pitch_observations == 0).astype(tools.INT)), [0]) == 1
+        # Determine which pitch observations occur directly after gaps
+        gap_offsets = np.append([0], np.diff(np.logical_not(pitch_observations == 0).astype(tools.INT))) == 1
+        # Construct a list of the indices surrounding gaps
+        gap_idcs = np.array([np.where(gap_onsets)[0], np.where(gap_offsets)[0]]).T
+
+        # Loop through all gaps in the pitch observations
+        for start, end in [list(gap) for gap in gap_idcs]:
+            # Extract the pitches to interpolate between
+            interp_start, interp_stop = pitch_observations[start], pitch_observations[end]
+            # Determine the number of values for the interpolation
+            num_values = end - start + 1
+            # Linearly interpolate the pitch across frames with empty pitch observations
+            pitch_observations[start : end + 1] = np.linspace(interp_start, interp_stop, num_values)
+
+        # Determine the nominal pitch of the note
+        nominal_pitch = round(pitches[i])
+
+        # Clip pitch observations such they are within supported semitone boundaries
+        pitch_observations = np.clip(pitch_observations,
+                                     a_min=nominal_pitch - semitone_width,
+                                     a_max=nominal_pitch + semitone_width)
+
+        # Compute the deviation between the pitch observations and the nominal value
+        deviations = pitch_observations - nominal_pitch
+
+        # Populate the multi pitch array with relative deviations for the note
+        relative_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = deviations
+
+    return relative_multi_pitch, adjusted_multi_pitch
 
 
-def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch_list, semitone_width=0.5):
+def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch_list, profile, semitone_width=0.5):
     """
     TODO - description
 
@@ -64,6 +181,8 @@ def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch
       Dictionary containing (slice -> (pitches, intervals)) pairs
     stacked_pitch_list : dict
       Dictionary containing (slice -> (times, pitch_list)) pairs
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
     semitone_width : float
       Amount of deviation from nominal pitch supported
 
@@ -76,11 +195,25 @@ def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch
       T - number of frames
     """
 
-    stacked_relative_multi_pitch = None
+    # Initialize an empty list to hold the multi pitch arrays
+    stacked_relative_multi_pitch = list()
 
-    # TODO - convert stacked notes to stacked multipitch
-    # TODO - feed notes and pitch list corresponding to one slice into above function
-    # TODO - stack the resulting multi pitch arrays for each slice
+    # Obtain the in-order keys for each stack
+    stacked_notes_keys = list(stacked_notes.keys())
+    stacked_pitch_list_keys = list(stacked_pitch_list.keys())
+
+    # Loop through the slices of the collections
+    for i in range(len(stacked_notes_keys)):
+        # Extract the key for the current slice in each collection
+        notes_key, pitch_list_key = stacked_notes_keys[i], stacked_pitch_list_keys[i]
+        # Obtain a relative pitch deviation map for the notes in this slice and add to the list
+        relative_multi_pitch, _ = monophonic_streams_to_relative_multi_pitch(stacked_notes[notes_key],
+                                                                             stacked_pitch_list[pitch_list_key],
+                                                                             profile, semitone_width)
+        stacked_relative_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(relative_multi_pitch))
+
+    # Collapse the list into an array
+    stacked_relative_multi_pitch = np.concatenate(stacked_relative_multi_pitch)
 
     return stacked_relative_multi_pitch
 
@@ -128,7 +261,23 @@ def stacked_relative_multi_pitch_to_relative_multi_pitch(stacked_multi_pitch, st
 
 def pitch_list_to_relative_multi_pitch(pitch_list, profile):
     """
+    Convert a MIDI pitch list into a relative multi pitch array.
     TODO - might not need this but it could still be useful
+
+    Parameters
+    ----------
+    pitch_list : list of ndarray (N x [...])
+      Array of MIDI pitches corresponding to notes
+      N - number of pitch observations (frames)
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
+
+    Returns
+    ----------
+    relative_multi_pitch : ndarray (F x T)
+      Relative pitch deviations anchored to discrete pitches
+      F - number of discrete pitches
+      T - number of frames
     """
 
     # Determine the dimensionality of the multi pitch array
@@ -163,7 +312,23 @@ def pitch_list_to_relative_multi_pitch(pitch_list, profile):
 
 def stacked_pitch_list_to_stacked_relative_multi_pitch(stacked_pitch_list, profile):
     """
+    Convert a stacked MIDI pitch list into a stack of relative multi pitch arrays.
     TODO - might not need this but it could still be useful
+
+    Parameters
+    ----------
+    stacked_pitch_list : dict
+      Dictionary containing (slice -> (times, pitch_list)) pairs
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
+
+    Returns
+    ----------
+    stacked_relative_multi_pitch : ndarray (S x F x T)
+      Array of deviations from multiple discrete pitches
+      S - number of slices in stack
+      F - number of discrete pitches
+      T - number of frames
     """
 
     # Initialize an empty list to hold the multi pitch arrays
@@ -173,6 +338,7 @@ def stacked_pitch_list_to_stacked_relative_multi_pitch(stacked_pitch_list, profi
     for slc in stacked_pitch_list.keys():
         # Get the pitches and intervals from the slice
         times, pitch_list = stacked_pitch_list[slc]
+        # Obtain a relative pitch deviation map for the pitch list and add to the list
         relative_multi_pitch = pitch_list_to_relative_multi_pitch(pitch_list, profile)
         stacked_relative_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(relative_multi_pitch))
 
