@@ -62,7 +62,7 @@ class GuitarSet(GuitarSet):
             stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
 
             # Obtain the relative pitch deviation of the contours anchored by string/fret
-            stacked_relative_multi_pitch = \
+            stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
                 utils.stacked_streams_to_stacked_relative_multi_pitch(stacked_notes,
                                                                       stacked_pitch_list,
                                                                       self.profile,
@@ -70,7 +70,8 @@ class GuitarSet(GuitarSet):
 
             # Collapse the stacked relative multi pitch array into a single representation
             data[constants.KEY_MULTIPITCH_REL] = \
-                utils.stacked_relative_multi_pitch_to_relative_multi_pitch(stacked_relative_multi_pitch)
+                utils.stacked_relative_multi_pitch_to_relative_multi_pitch(stacked_relative_multi_pitch,
+                                                                           stacked_adjusted_multi_pitch)
 
             # Collapse the stacked notes representation into a single collection
             pitches, intervals = tools.stacked_notes_to_notes(stacked_notes)
