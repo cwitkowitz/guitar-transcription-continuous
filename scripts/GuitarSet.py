@@ -61,6 +61,13 @@ class GuitarSet(GuitarSet):
             stacked_pitch_list = tools.load_stacked_pitch_list_jams(jams_path, times)
             stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
 
+            #fig = tools.initialize_figure(interactive=False, figsize=(20, 5))
+            #fig = tools.plot_pianoroll(stacked_multi_pitch[0], times, self.profile, fig=fig)
+            #tools.plot_pitch_list(*stacked_pitch_list[0], False, color='red', fig=fig)
+
+            # TODO - remove after verification of filter pitch list warning
+            utils.stacked_pitch_list_to_stacked_relative_multi_pitch(stacked_pitch_list, self.profile)
+
             # Obtain the relative pitch deviation of the contours anchored by string/fret
             stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
                 utils.stacked_streams_to_stacked_relative_multi_pitch(stacked_notes,
