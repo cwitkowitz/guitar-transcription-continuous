@@ -56,6 +56,11 @@ class GuitarSet(GuitarSet):
             # Convert the stacked multi pitch array into tablature
             #data[tools.KEY_TABLATURE] = tools.stacked_multi_pitch_to_tablature(stacked_multi_pitch, self.profile)
 
+            #if data[tools.KEY_TRACK] == '01_BN3-154-E_comp': # Null pitches
+            #if data[tools.KEY_TRACK] == '01_Funk2-108-Eb_comp': # Adjacent offset/onset missing
+            #if data[tools.KEY_TRACK] == '00_Funk1-97-C_comp': # Single observations during interval
+            #    print()
+
             # Load the string-wise pitch annotations from the JAMS file
             # TODO - add this to the ground-truth for evaluation of continuous pitch predictions?
             stacked_pitch_list = tools.load_stacked_pitch_list_jams(jams_path, times)

@@ -142,7 +142,8 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
 
             # Create a dataset corresponding to the training partition
             gset_train = GuitarSet(base_dir=None,
-                                   splits=train_splits,
+                                   # TODO - uncomment once data is all set
+                                   #splits=train_splits,
                                    hop_length=hop_length,
                                    sample_rate=sample_rate,
                                    num_frames=num_frames,

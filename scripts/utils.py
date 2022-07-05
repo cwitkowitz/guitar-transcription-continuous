@@ -6,34 +6,7 @@ import numpy as np
 import warnings
 
 
-"""
-def fill_empties(pitch_list):
-    "/""
-    Replace empty pitch observations across frames with null (zero) observations.
-    Generally, a pitch list should not contain null observations, but it is useful
-    to have them in some situations.
-
-    Parameters
-    ----------
-    pitch_list : list of ndarray (N x [...])
-      Frame-level observations detailing active pitches
-      N - number of frames
-
-    Returns
-    ----------
-    pitch_list : list of ndarray (N x [...])
-      Frame-level observations detailing active pitches
-      N - number of frames
-    "/""
-
-    # Add a null frequency to empty observations
-    pitch_list = [p if len(p) else np.array([0.]) for p in pitch_list]
-
-    return pitch_list
-"""
-
-
-def detect_overlap_notes(intervals):
+def detect_overlap_notes(intervals, decimals=3):
     """
     Determine if a set of intervals contains any overlap.
 
@@ -42,6 +15,8 @@ def detect_overlap_notes(intervals):
     intervals : ndarray (N x 2)
       Array of onset-offset time pairs
       N - number of notes
+    decimals : int (Optional - millisecond by default)
+      Decimal resolution for timing comparison
 
     Returns
     ----------
@@ -52,7 +27,7 @@ def detect_overlap_notes(intervals):
     # Make sure the intervals are sorted by onset (abusing this function slightly)
     intervals = tools.sort_batched_notes(intervals, by=0)
     # Check if any onsets occur before the offset of a previous interval
-    overlap = np.sum(np.diff(intervals.flatten()) < 0) > 0
+    overlap = np.sum(np.round(np.diff(intervals).flatten(), decimals) < 0) > 0
 
     return overlap
 
@@ -101,6 +76,28 @@ def detect_overlap_pitch_list(pitch_list):
     overlap = np.sum(get_active_pitch_count(pitch_list) > 1) > 0
 
     return overlap
+
+
+def contains_empties_pitch_list(pitch_list):
+    """
+    Determine if a pitch list representation contains empty observations.
+
+    Parameters
+    ----------
+    pitch_list : list of ndarray (N x [...])
+      Frame-level observations detailing active pitches
+      N - number of frames
+
+    Returns
+    ----------
+    contains_empties : bool
+      Whether there are any frames with no observations
+    """
+
+    # Check if at any time there are no observations
+    contains_empties = np.sum(get_active_pitch_count(pitch_list) == 0) > 0
+
+    return contains_empties
 
 
 def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
@@ -153,12 +150,12 @@ def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
         adjacent_differences = np.append(0, np.abs(np.diff(pitch_observations)))
     """
 
-    # TODO - should I actually slice up the pitch list here?
+    # TODO - should I actually slice up the pitch list here? don't think so
 
     return intervals
 
 
-def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semitone_width=0.5):
+def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semitone_width=0.5, times=None):
     """
     Represent note streams as anchored pitch deviations within a multi pitch array, along
     with an accompanying multi pitch array adjusted in accordance with the pitch list (so
@@ -168,6 +165,8 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
     and should function robustly under most circumstances, as long the note and pitch contour
     data provided is tightly aligned with no same-pitch notes played in unison or overlapping
     pitch contours with significant deviation from the nominal pitches of their note sources.
+
+    TODO - test with polyphonic data
 
     Parameters
     ----------
@@ -209,6 +208,8 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
     # Make sure there are no null observations in the pitch list
     pitch_list = tools.clean_pitch_list(pitch_list)
 
+    # TODO - if times given, resample the pitch list here
+
     # Check if there is any overlap within the streams
     if detect_overlap_notes(intervals) or detect_overlap_pitch_list(pitch_list):
         warnings.warn('Overlapping streams were provided. Will attempt ' +
@@ -243,15 +244,15 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
         adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
 
         # Adjust the onset index to the first frame with non-empty pitch observations
-        while not len(pitch_list[adjusted_onset]) and adjusted_onset < adjusted_offset:
+        while not len(pitch_list[adjusted_onset]) and adjusted_onset <= adjusted_offset:
             adjusted_onset += 1
 
         # Adjust the offset index to the last frame with non-empty pitch observations
-        while not len(pitch_list[adjusted_offset]) and adjusted_offset > adjusted_onset:
+        while not len(pitch_list[adjusted_offset]) and adjusted_offset >= adjusted_onset:
             adjusted_offset -= 1
 
         # Check that there are non-empty pitch observations
-        if adjusted_onset != adjusted_offset and len(pitch_list[adjusted_onset]):
+        if adjusted_onset <= adjusted_offset and len(pitch_list[adjusted_onset]):
             # Extract the (cropped) pitch observations within the note interval
             pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
         else:
@@ -261,13 +262,13 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
             # Reset the interval to the original note boundaries
             adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
             # Populate the frames with the average pitch of the note
-            pitch_observations = [np.ndarray([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
+            pitch_observations = [np.array([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
 
         # Populate the multi pitch array with adjusted activations for the note
         adjusted_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = 1
 
         # Check if there are any empty observations remaining
-        if np.sum([len(p) == 0 for p in pitch_observations]) > 0:
+        if contains_empties_pitch_list(pitch_observations):
             # There are some gaps in the observations, throw a warning
             warnings.warn('Missing pitch observations within note interval. ' +
                           'Will attempt to interpolate gaps.', category=RuntimeWarning)
@@ -374,6 +375,7 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
                           'overlap with any notes.', category=RuntimeWarning)
 
     # TODO - combine duplicated assignments with overall min/max time?
+    #        make this a parameter (reduce=True)
 
     # Replace note intervals with contour intervals, ignoring contours without an assignment
     notes = pitches[assignment[assignment != -1]], contour_times[assignment != -1]
@@ -430,7 +432,7 @@ def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch
         notes_key, pitch_list_key = stacked_notes_keys[i], stacked_pitch_list_keys[i]
         # Obtain the note stream multi pitch arrays for the notes in this slice
         relative_multi_pitch, \
-            adjusted_multi_pitch = streams_to_relative_multi_pitch_by_cluster(stacked_notes[notes_key],
+            adjusted_multi_pitch = streams_to_relative_multi_pitch_by_interval(stacked_notes[notes_key],
                                                                               stacked_pitch_list[pitch_list_key],
                                                                               profile, semitone_width)
         # Add the multi pitch arrays to their respective stacks
@@ -489,6 +491,31 @@ def stacked_relative_multi_pitch_to_relative_multi_pitch(stacked_relative_multi_
 ##################################################
 # CURRENTLY UNUSED                               #
 ##################################################
+
+
+def fill_empties(pitch_list):
+    """
+    Replace empty pitch observations across frames with null (zero) observations.
+    Generally, a pitch list should not contain null observations, but it is useful
+    to have them in some situations.
+
+    Parameters
+    ----------
+    pitch_list : list of ndarray (N x [...])
+      Frame-level observations detailing active pitches
+      N - number of frames
+
+    Returns
+    ----------
+    pitch_list : list of ndarray (N x [...])
+      Frame-level observations detailing active pitches
+      N - number of frames
+    """
+
+    # Add a null frequency to empty observations
+    pitch_list = [p if len(p) else np.array([0.]) for p in pitch_list]
+
+    return pitch_list
 
 
 def pitch_list_to_relative_multi_pitch(pitch_list, profile):
