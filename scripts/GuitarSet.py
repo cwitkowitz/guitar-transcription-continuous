@@ -65,7 +65,7 @@ class GuitarSet(GuitarSet):
             #fig = tools.plot_pianoroll(stacked_multi_pitch[0], times, self.profile, fig=fig)
             #tools.plot_pitch_list(*stacked_pitch_list[0], False, color='red', fig=fig)
 
-            # TODO - remove after verification of filter pitch list warning
+            # TODO - remove after verification of filter pitch list warning (out-of-bounds pitches)
             utils.stacked_pitch_list_to_stacked_relative_multi_pitch(stacked_pitch_list, self.profile)
 
             # Obtain the relative pitch deviation of the contours anchored by string/fret
