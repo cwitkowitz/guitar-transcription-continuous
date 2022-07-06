@@ -56,22 +56,10 @@ class GuitarSet(GuitarSet):
             # Convert the stacked multi pitch array into tablature
             #data[tools.KEY_TABLATURE] = tools.stacked_multi_pitch_to_tablature(stacked_multi_pitch, self.profile)
 
-            #if data[tools.KEY_TRACK] == '01_BN3-154-E_comp': # Null pitches
-            #if data[tools.KEY_TRACK] == '01_Funk2-108-Eb_comp': # Adjacent offset/onset missing
-            #if data[tools.KEY_TRACK] == '00_Funk1-97-C_comp': # Single observations during interval
-            #    print()
-
             # Load the string-wise pitch annotations from the JAMS file
             # TODO - add this to the ground-truth for evaluation of continuous pitch predictions?
-            stacked_pitch_list = tools.load_stacked_pitch_list_jams(jams_path, times)
+            stacked_pitch_list = tools.load_stacked_pitch_list_jams(jams_path)
             stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
-
-            #fig = tools.initialize_figure(interactive=False, figsize=(20, 5))
-            #fig = tools.plot_pianoroll(stacked_multi_pitch[0], times, self.profile, fig=fig)
-            #tools.plot_pitch_list(*stacked_pitch_list[0], False, color='red', fig=fig)
-
-            # TODO - remove after verification of filter pitch list warning (out-of-bounds pitches)
-            utils.stacked_pitch_list_to_stacked_relative_multi_pitch(stacked_pitch_list, self.profile)
 
             # Obtain the relative pitch deviation of the contours anchored by string/fret
             stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \

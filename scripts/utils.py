@@ -2,6 +2,8 @@
 import amt_tools.tools as tools
 
 # Regular imports
+from mir_eval.multipitch import resample_multipitch
+
 import numpy as np
 import warnings
 
@@ -32,30 +34,6 @@ def detect_overlap_notes(intervals, decimals=3):
     return overlap
 
 
-def get_active_pitch_count(pitch_list):
-    """
-    Count the number of active pitches in each frame of a pitch list.
-
-    Parameters
-    ----------
-    pitch_list : list of ndarray (N x [...])
-      Frame-level observations detailing active pitches
-      N - number of frames
-
-    Returns
-    ----------
-    active_pitch_count : ndarray
-      Number of active pitches in each frame
-    """
-
-    # Make sure there are no null observations in the pitch list
-    pitch_list = tools.clean_pitch_list(pitch_list)
-    # Determine the amount of non-zero frequencies in each frame
-    active_pitch_count = np.array([len(p) for p in pitch_list])
-
-    return active_pitch_count
-
-
 def detect_overlap_pitch_list(pitch_list):
     """
     Determine if a pitch list representation contains overlapping pitch contours.
@@ -73,31 +51,9 @@ def detect_overlap_pitch_list(pitch_list):
     """
 
     # Check if at any time there is more than one observation
-    overlap = np.sum(get_active_pitch_count(pitch_list) > 1) > 0
+    overlap = np.sum(tools.get_active_pitch_count(pitch_list) > 1) > 0
 
     return overlap
-
-
-def contains_empties_pitch_list(pitch_list):
-    """
-    Determine if a pitch list representation contains empty observations.
-
-    Parameters
-    ----------
-    pitch_list : list of ndarray (N x [...])
-      Frame-level observations detailing active pitches
-      N - number of frames
-
-    Returns
-    ----------
-    contains_empties : bool
-      Whether there are any frames with no observations
-    """
-
-    # Check if at any time there are no observations
-    contains_empties = np.sum(get_active_pitch_count(pitch_list) == 0) > 0
-
-    return contains_empties
 
 
 def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
@@ -106,7 +62,11 @@ def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
 
     TODO - for polyphonic data, would need simple PitchContourTracker with state
            in order to match offsets with most likely note (according to what
-           pitches still remain after the offset)
+           pitches still remain after the offset) keep track of active pitches
+           and attempt to pair new observations with active pitches, based on
+           minimum pitch difference (should work if contours don't cross and
+           are separated by sufficient distance) can return intervals and average
+           pitch across the contour
 
     Parameters
     ----------
@@ -127,7 +87,7 @@ def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
         raise ValueError('Only monophonic pitch contours are supported here.')
 
     # Determine the amount of active pitches in each frame
-    active_pitch_count = get_active_pitch_count(pitch_list)
+    active_pitch_count = tools.get_active_pitch_count(pitch_list)
 
     # Determine where the active pitch count increases by 1
     onset_idcs = np.where(np.diff(np.append(0, active_pitch_count)) == 1)[0]
@@ -137,8 +97,8 @@ def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
     # Construct the interval indices for the monophonic streams
     intervals = np.array([onset_idcs, offset_idcs]).T
 
+    # TODO - split where adjacent pitches differ by more than tolerance
     """
-    # TODO - edge case where offset/onset of two contours occur on adjacent frames
     if tolerance is not None:
         # Replace empty entries with null observations
         pitch_list = fill_empties(pitch_list)
@@ -149,8 +109,6 @@ def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
         # Determine the difference in pitch of adjacent frames
         adjacent_differences = np.append(0, np.abs(np.diff(pitch_observations)))
     """
-
-    # TODO - should I actually slice up the pitch list here? don't think so
 
     return intervals
 
@@ -166,7 +124,7 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
     data provided is tightly aligned with no same-pitch notes played in unison or overlapping
     pitch contours with significant deviation from the nominal pitches of their note sources.
 
-    TODO - test with polyphonic data
+    TODO - validate with polyphonic data
 
     Parameters
     ----------
@@ -179,13 +137,16 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
     pitch_list : tuple (times, pitch_list)
       pitch_list : list of ndarray (N x [...])
         Collection of MIDI pitches corresponding to (non-overlapping) notes
-      times : ndarray (N)
+      _times : ndarray (N)
         Time in seconds of beginning of each frame
       (N - number of pitch observations (frames))
     profile : InstrumentProfile (instrument.py)
       Instrument profile detailing experimental setup
     semitone_width : float
       Amount of deviation from nominal pitch supported
+    times : ndarray (L) (Optional)
+      Array of alternate times for optional resampling of pitch list
+      L - number of time samples (frames)
 
     Returns
     ----------
@@ -204,11 +165,16 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
     pitches, intervals = tools.filter_notes(*notes, profile, False)
 
     # Unpack the pitch list attributes
-    times, pitch_list = pitch_list
+    _times, pitch_list = pitch_list
     # Make sure there are no null observations in the pitch list
     pitch_list = tools.clean_pitch_list(pitch_list)
 
-    # TODO - if times given, resample the pitch list here
+    if times is not None:
+        # If times given, resample the pitch list here
+        pitch_list = resample_multipitch(_times, pitch_list, times)
+    else:
+        # Use the extracted times
+        times = _times
 
     # Check if there is any overlap within the streams
     if detect_overlap_notes(intervals) or detect_overlap_pitch_list(pitch_list):
@@ -268,7 +234,7 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
         adjusted_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = 1
 
         # Check if there are any empty observations remaining
-        if contains_empties_pitch_list(pitch_observations):
+        if tools.contains_empties_pitch_list(pitch_observations):
             # There are some gaps in the observations, throw a warning
             warnings.warn('Missing pitch observations within note interval. ' +
                           'Will attempt to interpolate gaps.', category=RuntimeWarning)
@@ -298,7 +264,46 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
     return relative_multi_pitch, adjusted_multi_pitch
 
 
-def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semitone_width=0.5):
+def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semitone_width=0.5, times=None):
+    """
+    TODO - function description
+
+    TODO - validate with polyphonic data
+
+    Parameters
+    ----------
+    notes : tuple (pitches, intervals)
+      pitches : ndarray (K)
+        Array of pitches corresponding to notes in MIDI format
+      intervals : ndarray (K x 2)
+        Array of onset-offset time pairs corresponding to (non-overlapping) notes
+      (K - number of notes)
+    pitch_list : tuple (times, pitch_list)
+      pitch_list : list of ndarray (N x [...])
+        Collection of MIDI pitches corresponding to (non-overlapping) notes
+      _times : ndarray (N)
+        Time in seconds of beginning of each frame
+      (N - number of pitch observations (frames))
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
+    semitone_width : float
+      Amount of deviation from nominal pitch supported
+    times : ndarray (L) (Optional)
+      Array of alternate times for optional resampling of pitch list
+      L - number of time samples (frames)
+
+    Returns
+    ----------
+    relative_multi_pitch : ndarray (F x T)
+      Relative pitch deviations anchored to discrete pitches
+      F - number of discrete pitches
+      T - number of frames
+    adjusted_multi_pitch : ndarray (F x T)
+      Discrete pitch activation map corresponding to pitch contours
+      F - number of discrete pitches
+      T - number of frames
+    """
+
     # TODO - how to deal with overlapping pitches? - need to cluster somehow
     # TODO - go through pitch list, find clumps of observations with no gaps
     # TODO - how to represent these clumps efficiently?
@@ -310,34 +315,14 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
     pitches, intervals = notes
 
     # Unpack the pitch list attributes
-    times, pitch_list = pitch_list
+    _times, pitch_list = pitch_list
     # Make sure there are no null observations in the pitch list
     pitch_list = tools.clean_pitch_list(pitch_list)
-
-    """
-    # Check if there is any overlapping in the streams
-    if detect_overlap_notes(intervals) or detect_overlap_pitch_list(pitch_list):
-        warnings.warn('Overlapping streams were provided. Will attempt ' +
-                      'to infer note-pitch groupings.', category=RuntimeWarning)
-
-    # TODO - implement everything below
-    #times, pitch_list = tools.cat_pitch_list(times, pitch_list, times.copy(), pitch_list.copy())
-
-    # Determine the dimensionality for the multi pitch array
-    num_pitches = profile.get_range_len()
-    num_frames = len(pitch_list)
-
-    # Initialize two empty multi pitch array for relative and adjusted multi pitch data
-    relative_multi_pitch = np.zeros((num_pitches, num_frames))
-    adjusted_multi_pitch = np.zeros((num_pitches, num_frames))
-    """
 
     # Obtain intervals for pitch observation clusters (contours)
     contour_intervals = infer_monophonic_pitch_list_groups(pitch_list)
     # Extract the corresponding times of the inferred contours
-    contour_times = times[contour_intervals.flatten()].reshape(contour_intervals.shape)
-    # Compute the duration of each inferred contour
-    #contour_durations = np.diff(contour_times).squeeze(-1)
+    contour_times = _times[contour_intervals.flatten()].reshape(contour_intervals.shape)
 
     # Determine the total number of clusters (contours)
     num_contours = contour_intervals.shape[0]
@@ -382,13 +367,14 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
 
     # Parse the inferred contour intervals to obtain the multi pitch arrays
     relative_multi_pitch, \
-        adjusted_multi_pitch = streams_to_relative_multi_pitch_by_interval(notes, pitch_list,
-                                                                           profile, semitone_width)
+        adjusted_multi_pitch = streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile,
+                                                                           semitone_width, times)
 
     return relative_multi_pitch, adjusted_multi_pitch
 
 
-def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch_list, profile, semitone_width=0.5):
+def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch_list, profile,
+                                                    semitone_width=0.5, times=None):
     """
     Convert associated stacked notes and stacked pitch contours into
     a stack of discretized and relative multi pitch activations.
@@ -398,11 +384,14 @@ def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch
     stacked_notes : dict
       Dictionary containing (slice -> (pitches, intervals)) pairs
     stacked_pitch_list : dict
-      Dictionary containing (slice -> (times, pitch_list)) pairs
+      Dictionary containing (slice -> (_times, pitch_list)) pairs
     profile : InstrumentProfile (instrument.py)
       Instrument profile detailing experimental setup
     semitone_width : float
       Amount of deviation from nominal pitch supported
+    times : ndarray (L) (Optional)
+      Array of alternate times for optional resampling of pitch lists
+      L - number of time samples (frames)
 
     Returns
     ----------
@@ -432,9 +421,9 @@ def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch
         notes_key, pitch_list_key = stacked_notes_keys[i], stacked_pitch_list_keys[i]
         # Obtain the note stream multi pitch arrays for the notes in this slice
         relative_multi_pitch, \
-            adjusted_multi_pitch = streams_to_relative_multi_pitch_by_interval(stacked_notes[notes_key],
+            adjusted_multi_pitch = streams_to_relative_multi_pitch_by_cluster(stacked_notes[notes_key],
                                                                               stacked_pitch_list[pitch_list_key],
-                                                                              profile, semitone_width)
+                                                                              profile, semitone_width, times)
         # Add the multi pitch arrays to their respective stacks
         stacked_relative_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(relative_multi_pitch))
         stacked_adjusted_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(adjusted_multi_pitch))
@@ -563,6 +552,7 @@ def pitch_list_to_relative_multi_pitch(pitch_list, profile):
 def stacked_pitch_list_to_stacked_relative_multi_pitch(stacked_pitch_list, profile):
     """
     Convert a stacked MIDI pitch list into a stack of relative multi pitch arrays.
+    This function assumes that all pitch lists are relative to the same timing grid.
 
     Parameters
     ----------
@@ -586,7 +576,7 @@ def stacked_pitch_list_to_stacked_relative_multi_pitch(stacked_pitch_list, profi
     # Loop through the slices of notes
     for slc in stacked_pitch_list.keys():
         # Get the pitches and intervals from the slice
-        times, pitch_list = stacked_pitch_list[slc]
+        _, pitch_list = stacked_pitch_list[slc]
         # Obtain a relative pitch deviation map for the pitch list and add to the list
         relative_multi_pitch = pitch_list_to_relative_multi_pitch(pitch_list, profile)
         stacked_relative_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(relative_multi_pitch))
