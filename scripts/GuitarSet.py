@@ -63,11 +63,11 @@ class GuitarSet(GuitarSet):
 
             # Obtain the relative pitch deviation of the contours anchored by string/fret
             stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
-                utils.stacked_streams_to_stacked_relative_multi_pitch(stacked_notes,
-                                                                      stacked_pitch_list,
-                                                                      self.profile,
-                                                                      semitone_width=1.5,
-                                                                      times=times)
+                utils.stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes,
+                                                                        stacked_pitch_list,
+                                                                        self.profile,
+                                                                        semitone_width=1.5,
+                                                                        times=times)
 
             # Collapse the stacked relative multi pitch array into a single representation
             data[constants.KEY_MULTIPITCH_REL] = \

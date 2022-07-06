@@ -113,7 +113,7 @@ def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
     return intervals
 
 
-def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semitone_width=0.5, times=None):
+def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, semitone_width=0.5, times=None):
     """
     Represent note streams as anchored pitch deviations within a multi pitch array, along
     with an accompanying multi pitch array adjusted in accordance with the pitch list (so
@@ -264,10 +264,14 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
     return relative_multi_pitch, adjusted_multi_pitch
 
 
-def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semitone_width=0.5,
-                                               times=None, combine_associated_contours=True):
+def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, semitone_width=0.5,
+                                                 times=None, minimum_contour_duration=None,
+                                                 combine_associated_contours=True):
     """
-    TODO - function description
+    Associate pitch contours in a pitch list with a collection of notes, then obtain
+    discretized and relative multi pitch information after adjusting the provided
+    note intervals based off of the intervals of the pitch contours associated with
+    each note.
 
     TODO - validate with polyphonic data
 
@@ -292,6 +296,8 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
     times : ndarray (L) (Optional)
       Array of alternate times for optional resampling of pitch list
       L - number of time samples (frames)
+    minimum_contour_duration : float (Optional)
+      Minimum amount of time in milliseconds a contour should span to be considered
     combine_associated_contours : bool
       Whether to construct a single interval from all contours assigned to the same note
 
@@ -320,11 +326,17 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
     # Extract the corresponding times of the inferred contours
     contour_times = _times[contour_intervals.flatten()].reshape(contour_intervals.shape)
 
-    # TODO - can remove contours with intervals below a certain
-    #        threshold here (parameter attempt_corrections=False)
+    # Compute the duration of each inferred contour
+    contour_durations = np.diff(contour_times).squeeze(-1)
+
+    if minimum_contour_duration is not None:
+        # TODO - should a warning be included here - probably not since the user
+        #        should know this will happen based on choice of parameter
+        # Remove contours with intervals smalled than specified threshold
+        contour_times = contour_times[contour_durations > minimum_contour_duration * 1E-3]
 
     # Determine the total number of clusters (contours)
-    num_contours = contour_intervals.shape[0]
+    num_contours = contour_times.shape[0]
 
     # Initialize a list for the assignment of each contour to a note
     assignment = -1 * np.ones(num_contours).astype(tools.INT)
@@ -393,14 +405,17 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
 
     # Parse the inferred contour intervals to obtain the multi pitch arrays
     relative_multi_pitch, \
-        adjusted_multi_pitch = streams_to_relative_multi_pitch_by_interval(contours, pitch_list, profile,
-                                                                           semitone_width, times)
+        adjusted_multi_pitch = streams_to_continuous_multi_pitch_by_interval(notes=contours,
+                                                                             pitch_list=pitch_list,
+                                                                             profile=profile,
+                                                                             semitone_width=semitone_width,
+                                                                             times=times)
 
     return relative_multi_pitch, adjusted_multi_pitch
 
 
-def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch_list, profile,
-                                                    semitone_width=0.5, times=None):
+def stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes, stacked_pitch_list, profile,
+                                                      semitone_width=0.5, times=None):
     """
     Convert associated stacked notes and stacked pitch contours into
     a stack of discretized and relative multi pitch activations.
@@ -444,12 +459,16 @@ def stacked_streams_to_stacked_relative_multi_pitch(stacked_notes, stacked_pitch
     # Loop through the slices of the collections
     for i in range(len(stacked_notes_keys)):
         # Extract the key for the current slice in each collection
-        notes_key, pitch_list_key = stacked_notes_keys[i], stacked_pitch_list_keys[i]
+        key_n, key_pl = stacked_notes_keys[i], stacked_pitch_list_keys[i]
         # Obtain the note stream multi pitch arrays for the notes in this slice
         relative_multi_pitch, \
-            adjusted_multi_pitch = streams_to_relative_multi_pitch_by_cluster(stacked_notes[notes_key],
-                                                                              stacked_pitch_list[pitch_list_key],
-                                                                              profile, semitone_width, times)
+            adjusted_multi_pitch = streams_to_continuous_multi_pitch_by_cluster(stacked_notes[key_n],
+                                                                                stacked_pitch_list[key_pl],
+                                                                                profile=profile,
+                                                                                semitone_width=semitone_width,
+                                                                                times=times,
+                                                                                minimum_contour_duration=100,
+                                                                                combine_associated_contours=True)
         # Add the multi pitch arrays to their respective stacks
         stacked_relative_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(relative_multi_pitch))
         stacked_adjusted_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(adjusted_multi_pitch))
