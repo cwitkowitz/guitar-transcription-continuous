@@ -134,7 +134,7 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
       intervals : ndarray (K x 2)
         Array of onset-offset time pairs corresponding to (non-overlapping) notes
       (K - number of notes)
-    pitch_list : tuple (times, pitch_list)
+    pitch_list : tuple (_times, pitch_list)
       pitch_list : list of ndarray (N x [...])
         Collection of MIDI pitches corresponding to (non-overlapping) notes
       _times : ndarray (N)
@@ -264,7 +264,8 @@ def streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile, semi
     return relative_multi_pitch, adjusted_multi_pitch
 
 
-def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semitone_width=0.5, times=None):
+def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semitone_width=0.5,
+                                               times=None, combine_associated_contours=True):
     """
     TODO - function description
 
@@ -278,8 +279,8 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
       intervals : ndarray (K x 2)
         Array of onset-offset time pairs corresponding to (non-overlapping) notes
       (K - number of notes)
-    pitch_list : tuple (times, pitch_list)
-      pitch_list : list of ndarray (N x [...])
+    pitch_list : tuple (_times, _pitch_list)
+      _pitch_list : list of ndarray (N x [...])
         Collection of MIDI pitches corresponding to (non-overlapping) notes
       _times : ndarray (N)
         Time in seconds of beginning of each frame
@@ -291,6 +292,8 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
     times : ndarray (L) (Optional)
       Array of alternate times for optional resampling of pitch list
       L - number of time samples (frames)
+    combine_associated_contours : bool
+      Whether to construct a single interval from all contours assigned to the same note
 
     Returns
     ----------
@@ -304,33 +307,24 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
       T - number of frames
     """
 
-    # TODO - how to deal with overlapping pitches? - need to cluster somehow
-    # TODO - go through pitch list, find clumps of observations with no gaps
-    # TODO - how to represent these clumps efficiently?
-    # TODO - assign each clump to a note unless there is literally zero overlap
-    # TODO - interpolate between any gaps in the clumps assigned to a note
-    # TODO - follow same methodology for multi pitch arrays as below
-
     # Unpack the note attributes
     pitches, intervals = notes
 
     # Unpack the pitch list attributes
-    _times, pitch_list = pitch_list
+    _times, _pitch_list = pitch_list
     # Make sure there are no null observations in the pitch list
-    pitch_list = tools.clean_pitch_list(pitch_list)
+    _pitch_list = tools.clean_pitch_list(_pitch_list)
 
     # Obtain intervals for pitch observation clusters (contours)
-    contour_intervals = infer_monophonic_pitch_list_groups(pitch_list)
+    contour_intervals = infer_monophonic_pitch_list_groups(_pitch_list)
     # Extract the corresponding times of the inferred contours
     contour_times = _times[contour_intervals.flatten()].reshape(contour_intervals.shape)
 
+    # TODO - can remove contours with intervals below a certain
+    #        threshold here (parameter attempt_corrections=False)
+
     # Determine the total number of clusters (contours)
     num_contours = contour_intervals.shape[0]
-
-    if num_contours < len(pitches):
-        # There are more notes than contours, throw a warning
-        warnings.warn('Not enough pitch contours were detected ' +
-                      'to account for all notes.', category=RuntimeWarning)
 
     # Initialize a list for the assignment of each contour to a note
     assignment = -1 * np.ones(num_contours).astype(tools.INT)
@@ -359,15 +353,47 @@ def streams_to_relative_multi_pitch_by_cluster(notes, pitch_list, profile, semit
             warnings.warn('Inferred pitch contour does not ' +
                           'overlap with any notes.', category=RuntimeWarning)
 
-    # TODO - combine duplicated assignments with overall min/max time?
-    #        make this a parameter (reduce=True)
+    # Count the total number of notes provided
+    num_notes = len(pitches)
+    # Determine which contours where assigned a note index
+    assigned_notes = np.unique(assignment)
 
-    # Replace note intervals with contour intervals, ignoring contours without an assignment
-    notes = pitches[assignment[assignment != -1]], contour_times[assignment != -1]
+    if len(np.setdiff1d(np.arange(num_notes), assigned_notes)):
+        # Some notes are not assigned to any pitch contours
+        warnings.warn('Some notes are not accounted for ' +
+                      'by any pitch contours.', category=RuntimeWarning)
+
+    if len(assigned_notes) < len(assignment):
+        # More than one pitch contour occurs maximally within a single note
+        warnings.warn('Multiple pitch contours assigned ' +
+                      'to the same note.', category=RuntimeWarning)
+
+    # TODO - could also check for pitch mismatch here and add a new
+    #        entry for a contour (parameter attempt_corrections=False)
+
+    if combine_associated_contours:
+        # Initialize empty arrays for combined contours
+        _pitches, _intervals = np.empty(0), np.empty((0, 2))
+        # Loop through all notes with assigned contours
+        for note_idx in assigned_notes:
+            # Add the pitch of the note assigned to the contours
+            _pitches = np.append(_pitches, pitches[note_idx])
+            # Obtain the intervals of the contours assigned to the note
+            _contour_times = contour_times[assignment == note_idx]
+            # Determine the earliest onset and latest offset among all contours
+            min_t, max_t = np.min(_contour_times[:, 0]), np.max(_contour_times[:, 1])
+            # Combine contours with the same note assignment
+            _intervals = np.append(_intervals, np.array([[min_t, max_t]]), axis=0)
+    else:
+        # Replace note intervals with contour intervals, ignoring contours without an assignment
+        _pitches, _intervals = pitches[assignment[assignment != -1]], contour_times[assignment != -1]
+
+    # Represent contours as note groups
+    contours = _pitches, _intervals
 
     # Parse the inferred contour intervals to obtain the multi pitch arrays
     relative_multi_pitch, \
-        adjusted_multi_pitch = streams_to_relative_multi_pitch_by_interval(notes, pitch_list, profile,
+        adjusted_multi_pitch = streams_to_relative_multi_pitch_by_interval(contours, pitch_list, profile,
                                                                            semitone_width, times)
 
     return relative_multi_pitch, adjusted_multi_pitch
