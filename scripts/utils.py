@@ -56,61 +56,180 @@ def detect_overlap_pitch_list(pitch_list):
     return overlap
 
 
-def infer_monophonic_pitch_list_groups(pitch_list, tolerance=None):
-    """
-    Infer the boundaries of pitch contours by the number of active pitches.
-
-    TODO - for polyphonic data, would need simple PitchContourTracker with state
-           in order to match offsets with most likely note (according to what
-           pitches still remain after the offset) keep track of active pitches
-           and attempt to pair new observations with active pitches, based on
-           minimum pitch difference (should work if contours don't cross and
-           are separated by sufficient distance) can return intervals and average
-           pitch across the contour
+"""
+def get_average_monophonic_pitch_list(pitch_list):
+    "/""
+    Obtain the average frequency across non-null pitch observations in a pitch list.
 
     Parameters
     ----------
     pitch_list : list of ndarray (N x [...])
-      Frame-level observations detailing active MIDI pitches
+      Frame-level observations detailing active pitches
       N - number of frames
-    tolerance : float (Optional)
-      Pitch difference (in semitones) allowed within adjacent frames of a contour
 
     Returns
     ----------
-    intervals : ndarray (K x 2)
-      Array of onset-offset index pairs corresponding to pitch contours
-    """
+    avg : float or None
+      Average pitch across non-null pitch observations
+    "/""
 
     if detect_overlap_pitch_list(pitch_list):
-        # Don't go any further if there is overlap in the pitch contours
-        raise ValueError('Only monophonic pitch contours are supported here.')
+        raise ValueError('Cannot compute average of polyphonic pitch list.')
 
-    # Determine the amount of active pitches in each frame
-    active_pitch_count = tools.get_active_pitch_count(pitch_list)
+    # Default the average in case there are no non-null observations
+    avg = None
 
-    # Determine where the active pitch count increases by 1
-    onset_idcs = np.where(np.diff(np.append(0, active_pitch_count)) == 1)[0]
-    # Determine where the active pitch count decreases by 1
-    offset_idcs = np.where(np.diff(np.append(active_pitch_count, 0)) == -1)[0]
+    # Only compute average if the pitch list is not empty
+    if np.sum(tools.get_active_pitch_count(pitch_list)):
+        # Compute the average across these observations
+        avg = np.mean(np.concatenate(pitch_list))
 
-    # Construct the interval indices for the monophonic streams
-    intervals = np.array([onset_idcs, offset_idcs]).T
+    return avg
+"""
 
-    # TODO - split where adjacent pitches differ by more than tolerance
+
+class PitchContour(object):
     """
-    if tolerance is not None:
-        # Replace empty entries with null observations
-        pitch_list = fill_empties(pitch_list)
-
-        # Collapse the monophonic pitch contours into a 1D array
-        pitch_observations = np.array([np.max(p) for p in pitch_list])
-
-        # Determine the difference in pitch of adjacent frames
-        adjacent_differences = np.append(0, np.abs(np.diff(pitch_observations)))
+    Simple class representing a collection of pitch
+    observations corresponding to a single pitch contour.
     """
 
-    return intervals
+    def __init__(self, onset_idx, onset_pitch):
+        """
+        Initialize a pitch contour object.
+
+        Parameters
+        ----------
+        onset_idx : int
+          Index within a pitch list where the contour begins
+        onset_pitch : float
+          Observed pitch at the onset frame of the contour
+        """
+
+        # Initialize the contour's interval indices
+        self.onset_idx = onset_idx
+        self.offset_idx = onset_idx
+
+        # Initialize an array to hold the pitch observations across the contour
+        self.pitch_observations = np.array([onset_pitch])
+
+    def append_observation(self, pitch):
+        """
+        Extend the tracked pitch contour with a new pitch observation.
+
+        Parameters
+        ----------
+        pitch : float
+          Observed pitch at the next frame of the contour
+        """
+
+        # Add the new pitch to the collection of observations
+        self.pitch_observations = np.append(self.pitch_observations, pitch)
+
+        # Increment the offset index
+        self.offset_idx += 1
+
+    def get_last_observation(self):
+        """
+        Helper function to access the most recent pitch observation.
+
+        Returns
+        ----------
+        last_observation : float
+          Observed pitch at the most recent frame
+        """
+
+        # Extract the most recent observation from the tracked pitches
+        last_observation = self.pitch_observations[-1]
+
+        return last_observation
+
+
+class ContourTracker(object):
+    """
+    Class to maintain state while parsing pitch lists to track pitch contours.
+    """
+
+    def __init__(self):
+        """
+        Initialize a contour tracker object.
+        """
+
+        # Initialize empty lists to hold all contours
+        # as well as the indices of active contours
+        self.contours = list()
+        self.active_idcs = list()
+
+    def get_active_contours(self):
+        # Group the contour objects of active contours in a list
+        active_contours = [self.contours[idx] for idx in self.active_idcs]
+
+        return active_contours
+
+    def get_active_pitches(self):
+        # Obtain the most recent pitch observation for all active contours
+        active_pitches = np.array([c.get_last_observation() for c in self.get_active_contours()])
+
+        return active_pitches
+
+    def parse_pitch_list(self, pitch_list, tolerance=None):
+        """
+        TODO
+        should work pretty well unless contours cross
+
+        Parameters
+        ----------
+        tolerance : float (Optional)
+          Pitch difference tolerated across adjacent frames of a single contour
+        """
+
+        # Loop through all observations in the pitch list
+        for i, observations in enumerate(pitch_list):
+            # Obtain the active pitches for comparison
+            active_pitches = self.get_active_pitches()
+            # Initialize arrays to keep track of assignments
+            assignment_ap = np.array([-1] * len(active_pitches))
+            assignment_ob = np.array([-1] * len(observations))
+
+            diffs = np.abs(np.concatenate([[active_pitches]] * max(1, len(observations)), axis=0) - observations)
+
+            if len(observations):
+                print()
+
+            # TODO - do matching here
+
+            # TODO - reconsider matches with pitch difference greater than tolerance
+
+            # Loop through active contours
+            for k, idx in enumerate(self.active_idcs):
+                # Check if the contour has no match
+                if assignment_ap[k] == -1:
+                    # Mark the contour as being inactive
+                    self.active_idcs.remove(idx)
+
+            # TODO - match current observations with active contours (extend by 1 frame)
+
+            # Loop through pitch observations with no matches
+            for pitch in observations[assignment_ob == -1]:
+                # Initialize a new contour for the pitch
+                self.contours += [PitchContour(i, pitch)]
+                # Mark the index of the contour as active
+                self.active_idcs += [len(self.contours) - 1]
+
+    def get_contour_observations(self):
+        contour_observations = None
+
+        return contour_observations
+
+    def get_contour_intervals(self):
+        contour_intervals = None
+
+        return contour_intervals
+
+    def get_contour_means(self):
+        contour_means = None
+
+        return contour_means
 
 
 def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, semitone_width=0.5, times=None):
@@ -321,8 +440,12 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, sem
     # Make sure there are no null observations in the pitch list
     _pitch_list = tools.clean_pitch_list(_pitch_list)
 
-    # Obtain intervals for pitch observation clusters (contours)
-    contour_intervals = infer_monophonic_pitch_list_groups(_pitch_list)
+    # Initialize a new pitch contour tracker
+    tracker = ContourTracker(tolerance=1.0)
+    # Track the contours within the provided pitch list
+    tracker.parse_pitch_list(_pitch_list)
+    # Obtain intervals and averages for pitch observation clusters (contours)
+    contour_intervals, contour_means = tracker.get_contour_intervals(), tracker.get_contour_means()
     # Extract the corresponding times of the inferred contours
     contour_times = _times[contour_intervals.flatten()].reshape(contour_intervals.shape)
 
@@ -330,16 +453,14 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, sem
     contour_durations = np.diff(contour_times).squeeze(-1)
 
     if minimum_contour_duration is not None:
-        # TODO - should a warning be included here - probably not since the user
-        #        should know this will happen based on choice of parameter
         # Remove contours with intervals smalled than specified threshold
         contour_times = contour_times[contour_durations > minimum_contour_duration * 1E-3]
 
     # Determine the total number of clusters (contours)
     num_contours = contour_times.shape[0]
 
-    # Initialize a list for the assignment of each contour to a note
-    assignment = -1 * np.ones(num_contours).astype(tools.INT)
+    # Initialize an array for the assignment of each contour to a note
+    assignment = np.array([-1] * len(num_contours))
 
     # Loop through each pitch contour
     for i, (start, end) in enumerate(contour_times):
@@ -382,6 +503,10 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, sem
 
     # TODO - could also check for pitch mismatch here and add a new
     #        entry for a contour (parameter attempt_corrections=False)
+    # TODO - compute average pitch for all contours
+    # TODO - compare this value with the pitch of the assigned note
+    # TODO - throw warning if the difference is above a threshold (semitone_width?)
+    # TODO - assign computed average pitch instead (create new note entry, insert the new length of the notes as the assignment)
 
     if combine_associated_contours:
         # Initialize empty arrays for combined contours
