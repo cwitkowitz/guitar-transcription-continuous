@@ -116,6 +116,7 @@ class PitchContour(object):
 class ContourTracker(object):
     """
     Class to maintain state while parsing pitch lists to track pitch contours.
+    TODO - add documentation to the rest of this class
     """
 
     def __init__(self):
@@ -127,6 +128,23 @@ class ContourTracker(object):
         # as well as the indices of active contours
         self.contours = list()
         self.active_idcs = list()
+
+    def track_new_contour(self, onset_idx, onset_pitch):
+        """
+        Start tracking a new pitch contour.
+
+        Parameters
+        ----------
+        onset_idx : int
+          Index within a pitch list where the contour begins
+        onset_pitch : float
+          Observed pitch at the onset frame of the contour
+        """
+
+        # Initialize a new contour for the pitch
+        self.contours += [PitchContour(onset_idx, onset_pitch)]
+        # Mark the index of the contour as active
+        self.active_idcs += [len(self.contours) - 1]
 
     def get_active_contours(self):
         # Group the contour objects of active contours in a list
@@ -142,8 +160,7 @@ class ContourTracker(object):
 
     def parse_pitch_list(self, pitch_list, tolerance=None):
         """
-        TODO
-        should work pretty well unless contours cross
+        TODO - mention that it should work pretty well unless contours cross
 
         Parameters
         ----------
@@ -169,21 +186,27 @@ class ContourTracker(object):
             magnitude_difference = np.abs(expanded_pitches - np.expand_dims(observations, axis=-1))
 
             if num_ap and num_ob:
-                # TODO - if matrix is NxM, there needs to be min(N, M) assignments
+                # Iterate in case first choice is not granted
+                while np.sum(assignment_ob != -1) < min(num_ap, num_ob):
+                    # Don't consider columns and rows that have already been matched
+                    magnitude_difference[:, assignment_ap != -1] = np.inf
+                    magnitude_difference[assignment_ob != -1] = np.inf
 
-                # Determine the pairs with minimum difference from the active pitches for both views
-                best_mapping_ap = np.argmin(magnitude_difference, axis=0)
-                best_mapping_ob = np.argmin(magnitude_difference, axis=1)
+                    # Determine the pairs with minimum difference from the active pitches for both views
+                    best_mapping_ap = np.argmin(magnitude_difference, axis=0)
+                    best_mapping_ob = np.argmin(magnitude_difference, axis=1)
 
-                # Determine which indices represent true matches for both views
-                matches_ap = best_mapping_ob[best_mapping_ap] == np.arange(len(best_mapping_ap))
-                matches_ob = best_mapping_ap[best_mapping_ob] == np.arange(len(best_mapping_ob))
+                    # Determine which indices represent true matches for both views
+                    matches_ap = best_mapping_ob[best_mapping_ap] == np.arange(len(best_mapping_ap))
+                    matches_ob = best_mapping_ap[best_mapping_ob] == np.arange(len(best_mapping_ob))
 
-                # Assign matches to their respective indices for both views
-                assignment_ap[matches_ap] = best_mapping_ap[matches_ap]
-                assignment_ob[matches_ob] = best_mapping_ob[matches_ob]
+                    # Don't reassign anything that has already been assigned
+                    matches_ap[assignment_ap != -1] = False
+                    matches_ob[assignment_ob != -1] = False
 
-            # TODO - reconsider matches with pitch difference greater than tolerance
+                    # Assign matches to their respective indices for both views
+                    assignment_ap[matches_ap] = best_mapping_ap[matches_ap]
+                    assignment_ob[matches_ob] = best_mapping_ob[matches_ob]
 
             # Create a copy of the active indices to iterate through
             active_idcs_copy = self.active_idcs.copy()
@@ -199,15 +222,21 @@ class ContourTracker(object):
                 else:
                     # Determine which pitch was matched to this contour
                     matched_pitch = observations[assignment_ap[k]]
-                    # Append the matched pitch to the contour
-                    self.contours[idx].append_observation(matched_pitch)
+                    # Make sure the matched pitch is within the specified tolerance
+                    if tolerance is not None and \
+                            np.abs(self.contours[idx].get_last_observation() - matched_pitch) <= tolerance:
+                        # Append the matched pitch to the contour
+                        self.contours[idx].append_observation(matched_pitch)
+                    else:
+                        # Mark the contour as being inactive
+                        self.active_idcs.remove(idx)
+                        # Start tracking a new contour instead
+                        self.track_new_contour(i, pitch)
 
             # Loop through pitch observations with no matches
             for pitch in observations[assignment_ob == -1]:
-                # Initialize a new contour for the pitch
-                self.contours += [PitchContour(i, pitch)]
-                # Mark the index of the contour as active
-                self.active_idcs += [len(self.contours) - 1]
+                # Start tracking a new contour
+                self.track_new_contour(i, pitch)
 
     def get_contour_observations(self):
         contour_observations = None
