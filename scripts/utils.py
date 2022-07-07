@@ -116,7 +116,6 @@ class PitchContour(object):
 class ContourTracker(object):
     """
     Class to maintain state while parsing pitch lists to track pitch contours.
-    TODO - add documentation to the rest of this class
     """
 
     def __init__(self):
@@ -147,12 +146,30 @@ class ContourTracker(object):
         self.active_idcs += [len(self.contours) - 1]
 
     def get_active_contours(self):
+        """
+        Obtain references to all active pitch contours.
+
+        Returns
+        ----------
+        active_pitches : list of PitchContour
+          Currently active pitch contours
+        """
+
         # Group the contour objects of active contours in a list
         active_contours = [self.contours[idx] for idx in self.active_idcs]
 
         return active_contours
 
     def get_active_pitches(self):
+        """
+        Obtain the most recent pitch observed for all active pitch contours.
+
+        Returns
+        ----------
+        active_pitches : ndarray
+          Last pitches observed for each contour
+        """
+
         # Obtain the most recent pitch observation for all active contours
         active_pitches = np.array([c.get_last_observation() for c in self.get_active_contours()])
 
@@ -160,10 +177,17 @@ class ContourTracker(object):
 
     def parse_pitch_list(self, pitch_list, tolerance=None):
         """
-        TODO - mention that it should work pretty well unless contours cross
+        Parse a pitch list and track the activity of all pitch contours, which are inferred via
+        separation by empty frames or deviations in pitch above a specified tolerance. The function
+        should work well for polyphonic pitch contours unless contours cross or get very close to
+        one another. In the polyphonic case, a matching strategy is employed to determine when
+        pitch contours become active and inactive.
 
         Parameters
         ----------
+        pitch_list : list of ndarray (N x [...])
+          Frame-level observations detailing active MIDI pitches
+          N - number of frames
         tolerance : float (Optional)
           Pitch difference tolerated across adjacent frames of a single contour
         """
@@ -231,27 +255,42 @@ class ContourTracker(object):
                         # Mark the contour as being inactive
                         self.active_idcs.remove(idx)
                         # Start tracking a new contour instead
-                        self.track_new_contour(i, pitch)
+                        self.track_new_contour(i, matched_pitch)
 
             # Loop through pitch observations with no matches
             for pitch in observations[assignment_ob == -1]:
                 # Start tracking a new contour
                 self.track_new_contour(i, pitch)
 
-    def get_contour_observations(self):
-        contour_observations = None
-
-        return contour_observations
-
     def get_contour_intervals(self):
-        contour_intervals = None
+        """
+        Helper function to get the intervals of all tracked pitch contours.
 
-        return contour_intervals
+        Returns
+        ----------
+        intervals : ndarray (N x 2)
+          Array of onset-offset index pairs corresponding to pitch contours
+        """
+
+        # Group the onset and offset indices of all tracked contours
+        intervals = np.array([[c.onset_idx, c.offset_idx] for c in self.contours])
+
+        return intervals
 
     def get_contour_means(self):
-        contour_means = None
+        """
+        Helper function to get the average pitch of all tracked pitch contours.
 
-        return contour_means
+        Returns
+        ----------
+        means : ndarray
+          Array of average pitches corresponding to pitch contours
+        """
+
+        # Compute the average pitch for all tracked contours
+        means = np.array([np.mean(c.pitch_observations) for c in self.contours])
+
+        return means
 
 
 def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, semitone_width=0.5, times=None):
