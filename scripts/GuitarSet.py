@@ -70,7 +70,9 @@ class GuitarSet(GuitarSet):
                                                                         semitone_width=1.5,
                                                                         stream_tolerance=1.0,
                                                                         minimum_contour_duration=100,
-                                                                        combine_associated_contours=True)
+                                                                        attempt_corrections=True,
+                                                                        combine_associated_contours=True,
+                                                                        suppress_warnings=False)
 
             # Collapse the stacked relative multi pitch array into a single representation
             data[constants.KEY_MULTIPITCH_REL] = \

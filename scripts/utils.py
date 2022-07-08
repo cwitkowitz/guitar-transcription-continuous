@@ -293,7 +293,8 @@ class ContourTracker(object):
         return means
 
 
-def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, times=None, semitone_width=0.5):
+def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, times=None,
+                                                  semitone_width=0.5, suppress_warnings=True):
     """
     Represent note streams as anchored pitch deviations within a multi pitch array, along
     with an accompanying multi pitch array adjusted in accordance with the pitch list (so
@@ -327,6 +328,8 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
       L - number of time samples (frames)
     semitone_width : float
       Amount of deviation from nominal pitch supported
+    suppress_warnings : bool
+      Whether to ignore warning messages
 
     Returns
     ----------
@@ -341,8 +344,7 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
     """
 
     # Unpack the note attributes, removing notes with out-of-bounds nominal pitch
-    # TODO - leave suppress warnings true
-    pitches, intervals = tools.filter_notes(*notes, profile, False)
+    pitches, intervals = tools.filter_notes(*notes, profile, suppress_warnings)
 
     # Unpack the pitch list attributes
     _times, pitch_list = pitch_list
@@ -357,7 +359,7 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
         times = _times
 
     # Check if there is any overlap within the streams
-    if detect_overlap_notes(intervals) or detect_overlap_pitch_list(pitch_list):
+    if (detect_overlap_notes(intervals) or detect_overlap_pitch_list(pitch_list)) and not suppress_warnings:
         warnings.warn('Overlapping streams were provided. Will attempt ' +
                       'to infer note-pitch groupings.', category=RuntimeWarning)
 
@@ -402,9 +404,10 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
             # Extract the (cropped) pitch observations within the note interval
             pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
         else:
-            # There are no non-empty pitch observations, throw a warning
-            warnings.warn('No pitch observations occur within the note interval. ' +
-                          'Inserting average pitch of note instead.', category=RuntimeWarning)
+            if not suppress_warnings:
+                # There are no non-empty pitch observations, throw a warning
+                warnings.warn('No pitch observations occur within the note interval. ' +
+                              'Inserting average pitch of note instead.', category=RuntimeWarning)
             # Reset the interval to the original note boundaries
             adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
             # Populate the frames with the average pitch of the note
@@ -414,13 +417,15 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
         adjusted_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = 1
 
         # Check if there are any empty observations remaining
-        if tools.contains_empties_pitch_list(pitch_observations):
+        if tools.contains_empties_pitch_list(pitch_observations) and not suppress_warnings:
             # There are some gaps in the observations, throw a warning
             warnings.warn('Missing pitch observations within note interval. ' +
                           'Will attempt to interpolate gaps.', category=RuntimeWarning)
 
         # Convert the cropped pitch list to an array of monophonic pitches, choosing
         # the pitch closest to the nominal value of the note if a frame is polyphonic
+        # TODO - if this function is called from the clustering variant, we already have
+        #        these and this may even be less precise in some polyphonic corner cases
         pitch_observations = np.array([p[np.argmin(np.abs(p - pitches[i]))]
                                        if len(p) else 0. for p in pitch_observations])
 
@@ -446,7 +451,8 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
 
 def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, times=None, semitone_width=0.5,
                                                  stream_tolerance=1.0, minimum_contour_duration=None,
-                                                 combine_associated_contours=True):
+                                                 attempt_corrections=False, combine_associated_contours=True,
+                                                 suppress_warnings=True):
     """
     Associate pitch contours in a pitch list with a collection of notes, then obtain
     discretized and relative multi pitch information after adjusting the provided
@@ -480,8 +486,12 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
       Pitch difference tolerated across adjacent frames of a single contour
     minimum_contour_duration : float (Optional)
       Minimum amount of time in milliseconds a contour should span to be considered
+    attempt_corrections : bool
+      Whether to avoid grouping contours and notes with pitch mismatch and attempt to remedy these situations
     combine_associated_contours : bool
       Whether to construct a single interval from all contours assigned to the same note
+    suppress_warnings : bool
+      Whether to ignore warning messages
 
     Returns
     ----------
@@ -519,10 +529,8 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
         # Determine which contours have duration above the minimum required
         valid_contours = contour_durations > minimum_contour_duration * 1E-3
         # Remove contours with intervals smaller than specified threshold
-        #contour_intervals = contour_intervals[valid_contours]
         contour_means = contour_means[valid_contours]
         contour_times = contour_times[valid_contours]
-        #contour_durations = contour_durations[valid_contours]
 
     # Determine the total number of clusters (contours)
     num_contours = len(contour_means)
@@ -550,31 +558,48 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
             # Assign the chosen note to the contour
             assignment[i] = note_idx
         else:
-            # Pitch contour cannot be paired with a note, throw a warning
-            warnings.warn('Inferred pitch contour does not ' +
-                          'overlap with any notes.', category=RuntimeWarning)
+            if not suppress_warnings:
+                # Pitch contour cannot be paired with a note, throw a warning
+                warnings.warn('Inferred pitch contour does not ' +
+                              'overlap with any notes.', category=RuntimeWarning)
+
+    # Ignore pitch contours without an assignment
+    contour_means = contour_means[assignment != -1]
+    contour_times = contour_times[assignment != -1]
+    assignment = assignment[assignment != -1]
 
     # Count the total number of notes provided
     num_notes = len(pitches)
     # Determine which contours where assigned a note index
     assigned_notes = np.unique(assignment)
 
-    if len(np.setdiff1d(np.arange(num_notes), assigned_notes)):
+    if len(np.setdiff1d(np.arange(num_notes), assigned_notes)) and not suppress_warnings:
         # Some notes are not assigned to any pitch contours
         warnings.warn('Some notes are not accounted for ' +
                       'by any pitch contours.', category=RuntimeWarning)
 
-    if len(assigned_notes) < len(assignment):
+    if len(assigned_notes) < len(assignment) and not suppress_warnings:
         # More than one pitch contour occurs maximally within a single note
         warnings.warn('Multiple pitch contours assigned ' +
                       'to the same note.', category=RuntimeWarning)
 
-    # TODO - could also check for pitch mismatch here and add a new
-    #        entry for a contour (parameter attempt_corrections=False)
-    # TODO - compute average pitch for all contours
-    # TODO - compare this value with the pitch of the assigned note
-    # TODO - throw warning if the difference is above a threshold (semitone_width?)
-    # TODO - assign computed average pitch instead (create new note entry, insert the new length of the notes as the assignment)
+    # Compute the difference in magnitude between the average pitch of
+    # the contour and the average pitch of the note for each grouping
+    magnitude_differences = np.abs(pitches[assignment] - contour_means)
+
+    for i in np.where(magnitude_differences > semitone_width)[0]:
+        if not suppress_warnings:
+            # Average pitches of a contour and note match is too large
+            warnings.warn('Average pitch of grouped contour and note differ ' +
+                          'beyond specified semitone width.', category=RuntimeWarning)
+        if attempt_corrections:
+            # Create new note entry for the poorly matching contour (no need
+            # to update note intervals, since contour times are used instead)
+            pitches = np.append(pitches, contour_means[i])
+            # Change the assignment of the contour
+            assignment[i] = len(pitches) - 1
+            # Add the new note index to the list of assigned notes
+            assigned_notes = np.append(assigned_notes, assignment[i])
 
     if combine_associated_contours:
         # Initialize empty arrays for combined contours
@@ -600,7 +625,8 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
     relative_multi_pitch, \
         adjusted_multi_pitch = streams_to_continuous_multi_pitch_by_interval(notes=contours, pitch_list=pitch_list,
                                                                              profile=profile, times=times,
-                                                                             semitone_width=semitone_width)
+                                                                             semitone_width=semitone_width,
+                                                                             suppress_warnings=suppress_warnings)
 
     return relative_multi_pitch, adjusted_multi_pitch
 
