@@ -61,17 +61,16 @@ class GuitarSet(GuitarSet):
             stacked_pitch_list = tools.load_stacked_pitch_list_jams(jams_path)
             stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
 
-            tracker = utils.ContourTracker()
-            tracker.parse_pitch_list(tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)[1], tolerance=1.0)
-            tracker.get_contour_intervals(), tracker.get_contour_means()
-
             # Obtain the relative pitch deviation of the contours anchored by string/fret
             stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
                 utils.stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes,
                                                                         stacked_pitch_list,
                                                                         self.profile,
+                                                                        times=times,
                                                                         semitone_width=1.5,
-                                                                        times=times)
+                                                                        stream_tolerance=1.0,
+                                                                        minimum_contour_duration=100,
+                                                                        combine_associated_contours=True)
 
             # Collapse the stacked relative multi pitch array into a single representation
             data[constants.KEY_MULTIPITCH_REL] = \

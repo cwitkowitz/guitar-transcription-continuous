@@ -293,7 +293,7 @@ class ContourTracker(object):
         return means
 
 
-def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, semitone_width=0.5, times=None):
+def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, times=None, semitone_width=0.5):
     """
     Represent note streams as anchored pitch deviations within a multi pitch array, along
     with an accompanying multi pitch array adjusted in accordance with the pitch list (so
@@ -322,11 +322,11 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, se
       (N - number of pitch observations (frames))
     profile : InstrumentProfile (instrument.py)
       Instrument profile detailing experimental setup
-    semitone_width : float
-      Amount of deviation from nominal pitch supported
     times : ndarray (L) (Optional)
       Array of alternate times for optional resampling of pitch list
       L - number of time samples (frames)
+    semitone_width : float
+      Amount of deviation from nominal pitch supported
 
     Returns
     ----------
@@ -444,8 +444,8 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, se
     return relative_multi_pitch, adjusted_multi_pitch
 
 
-def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, semitone_width=0.5,
-                                                 times=None, minimum_contour_duration=None,
+def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, times=None, semitone_width=0.5,
+                                                 stream_tolerance=1.0, minimum_contour_duration=None,
                                                  combine_associated_contours=True):
     """
     Associate pitch contours in a pitch list with a collection of notes, then obtain
@@ -471,11 +471,13 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, sem
       (N - number of pitch observations (frames))
     profile : InstrumentProfile (instrument.py)
       Instrument profile detailing experimental setup
-    semitone_width : float
-      Amount of deviation from nominal pitch supported
     times : ndarray (L) (Optional)
       Array of alternate times for optional resampling of pitch list
       L - number of time samples (frames)
+    semitone_width : float
+      Amount of deviation from nominal pitch supported
+    stream_tolerance : float
+      Pitch difference tolerated across adjacent frames of a single contour
     minimum_contour_duration : float (Optional)
       Minimum amount of time in milliseconds a contour should span to be considered
     combine_associated_contours : bool
@@ -502,9 +504,9 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, sem
     _pitch_list = tools.clean_pitch_list(_pitch_list)
 
     # Initialize a new pitch contour tracker
-    tracker = ContourTracker(tolerance=0.5)
+    tracker = ContourTracker()
     # Track the contours within the provided pitch list
-    tracker.parse_pitch_list(_pitch_list)
+    tracker.parse_pitch_list(_pitch_list, tolerance=stream_tolerance)
     # Obtain intervals and averages for pitch observation clusters (contours)
     contour_intervals, contour_means = tracker.get_contour_intervals(), tracker.get_contour_means()
     # Extract the corresponding times of the inferred contours
@@ -514,14 +516,19 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, sem
     contour_durations = np.diff(contour_times).squeeze(-1)
 
     if minimum_contour_duration is not None:
-        # Remove contours with intervals smalled than specified threshold
-        contour_times = contour_times[contour_durations > minimum_contour_duration * 1E-3]
+        # Determine which contours have duration above the minimum required
+        valid_contours = contour_durations > minimum_contour_duration * 1E-3
+        # Remove contours with intervals smaller than specified threshold
+        #contour_intervals = contour_intervals[valid_contours]
+        contour_means = contour_means[valid_contours]
+        contour_times = contour_times[valid_contours]
+        #contour_durations = contour_durations[valid_contours]
 
     # Determine the total number of clusters (contours)
-    num_contours = contour_times.shape[0]
+    num_contours = len(contour_means)
 
     # Initialize an array for the assignment of each contour to a note
-    assignment = np.array([-1] * len(num_contours))
+    assignment = np.array([-1] * num_contours)
 
     # Loop through each pitch contour
     for i, (start, end) in enumerate(contour_times):
@@ -591,17 +598,14 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, sem
 
     # Parse the inferred contour intervals to obtain the multi pitch arrays
     relative_multi_pitch, \
-        adjusted_multi_pitch = streams_to_continuous_multi_pitch_by_interval(notes=contours,
-                                                                             pitch_list=pitch_list,
-                                                                             profile=profile,
-                                                                             semitone_width=semitone_width,
-                                                                             times=times)
+        adjusted_multi_pitch = streams_to_continuous_multi_pitch_by_interval(notes=contours, pitch_list=pitch_list,
+                                                                             profile=profile, times=times,
+                                                                             semitone_width=semitone_width)
 
     return relative_multi_pitch, adjusted_multi_pitch
 
 
-def stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes, stacked_pitch_list, profile,
-                                                      semitone_width=0.5, times=None):
+def stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes, stacked_pitch_list, profile, **kwargs):
     """
     Convert associated stacked notes and stacked pitch contours into
     a stack of discretized and relative multi pitch activations.
@@ -614,11 +618,8 @@ def stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes, stacked_pit
       Dictionary containing (slice -> (_times, pitch_list)) pairs
     profile : InstrumentProfile (instrument.py)
       Instrument profile detailing experimental setup
-    semitone_width : float
-      Amount of deviation from nominal pitch supported
-    times : ndarray (L) (Optional)
-      Array of alternate times for optional resampling of pitch lists
-      L - number of time samples (frames)
+    **kwargs : N/A
+      Arguments for converting to stream
 
     Returns
     ----------
@@ -650,11 +651,7 @@ def stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes, stacked_pit
         relative_multi_pitch, \
             adjusted_multi_pitch = streams_to_continuous_multi_pitch_by_cluster(stacked_notes[key_n],
                                                                                 stacked_pitch_list[key_pl],
-                                                                                profile=profile,
-                                                                                semitone_width=semitone_width,
-                                                                                times=times,
-                                                                                minimum_contour_duration=100,
-                                                                                combine_associated_contours=True)
+                                                                                profile, **kwargs)
         # Add the multi pitch arrays to their respective stacks
         stacked_relative_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(relative_multi_pitch))
         stacked_adjusted_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(adjusted_multi_pitch))
