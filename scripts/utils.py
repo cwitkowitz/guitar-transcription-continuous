@@ -272,14 +272,22 @@ class ContourTracker(object):
           Array of onset-offset index pairs corresponding to pitch contours
         """
 
-        # Group the onset and offset indices of all tracked contours
-        intervals = np.array([[c.onset_idx, c.offset_idx] for c in self.contours])
+        if len(self.contours):
+            # Group the onset and offset indices of all tracked contours
+            intervals = np.array([[c.onset_idx, c.offset_idx] for c in self.contours])
+        else:
+            # Empty array with the correct size
+            intervals = np.zeros((0, 2))
 
         return intervals
 
     def get_contour_means(self):
         """
         Helper function to get the average pitch of all tracked pitch contours.
+
+        TODO - could also write functions to get average of a region of the contour, i.e.
+               [25% duration, 50% duration], or similar statistics such as lowest/highest
+               pitch across a fixed duration window
 
         Returns
         ----------
@@ -379,6 +387,9 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
     times = np.concatenate([[times]] * max(1, len(pitch_idcs)), axis=0)
 
     # Determine the frame where each note begins and ends
+    # TODO - if pitch list is undersampled, adjacent notes can end up having
+    #        same offset/onset frames, even though the pitch observation in
+    #        the pitch list at the frame only corresponds to one note
     onset_idcs = np.argmin((times <= intervals[..., :1]), axis=1) - 1
     offset_idcs = np.argmin((times < intervals[..., 1:]), axis=1) - 1
 
@@ -388,6 +399,9 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
 
     # Loop through each note
     for i in range(len(pitch_idcs)):
+        #if (i != len(pitch_idcs) -1) and offset_idcs[i] == onset_idcs[i + 1] and pitch_idcs[i] != pitch_idcs[i+1]:
+        #    print()
+
         # Keep track of adjusted note boundaries without modifying original values
         adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
 
@@ -405,6 +419,8 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
             pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
         else:
             if not suppress_warnings:
+                # TODO - occurs quite frequently for notes with small
+                #        duration if the pitch list is undersampled.
                 # There are no non-empty pitch observations, throw a warning
                 warnings.warn('No pitch observations occur within the note interval. ' +
                               'Inserting average pitch of note instead.', category=RuntimeWarning)
@@ -519,8 +535,13 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
     tracker.parse_pitch_list(_pitch_list, tolerance=stream_tolerance)
     # Obtain intervals and averages for pitch observation clusters (contours)
     contour_intervals, contour_means = tracker.get_contour_intervals(), tracker.get_contour_means()
-    # Extract the corresponding times of the inferred contours
-    contour_times = _times[contour_intervals.flatten()].reshape(contour_intervals.shape)
+
+    if len(contour_means):
+        # Extract the corresponding times of the inferred contours
+        contour_times = _times[contour_intervals.flatten()].reshape(contour_intervals.shape)
+    else:
+        # Empty array with the correct size
+        contour_times = np.zeros((0, 2))
 
     # Compute the duration of each inferred contour
     contour_durations = np.diff(contour_times).squeeze(-1)
@@ -536,7 +557,7 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
     num_contours = len(contour_means)
 
     # Initialize an array for the assignment of each contour to a note
-    assignment = np.array([-1] * num_contours)
+    assignment = np.array([-1] * num_contours, dtype=tools.INT)
 
     # Loop through each pitch contour
     for i, (start, end) in enumerate(contour_times):
@@ -575,6 +596,15 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
 
     if len(np.setdiff1d(np.arange(num_notes), assigned_notes)) and not suppress_warnings:
         # Some notes are not assigned to any pitch contours
+        # TODO - occurs quite frequently when notes of same pitch are
+        #        played consecutively with no silent frames in between.
+        #        Currently, addressing this case isn't really important,
+        #        since for now there is no explicit onset estimation and
+        #        the result is only multipitch activity. However, this
+        #        could otherwise be addressed by identify notes of the
+        #        same pitch with boundaries within the same frame, and
+        #        breaking apart inferred contours at the intersection of
+        #        these frames.
         warnings.warn('Some notes are not accounted for ' +
                       'by any pitch contours.', category=RuntimeWarning)
 
@@ -585,6 +615,7 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
 
     # Compute the difference in magnitude between the average pitch of
     # the contour and the average pitch of the note for each grouping
+    # TODO - doesn't necessarily have to be the mean of the contour
     magnitude_differences = np.abs(pitches[assignment] - contour_means)
 
     for i in np.where(magnitude_differences > semitone_width)[0]:
@@ -598,8 +629,8 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
             pitches = np.append(pitches, contour_means[i])
             # Change the assignment of the contour
             assignment[i] = len(pitches) - 1
-            # Add the new note index to the list of assigned notes
-            assigned_notes = np.append(assigned_notes, assignment[i])
+            # Update the list of assigned notes
+            assigned_notes = np.unique(assignment)
 
     if combine_associated_contours:
         # Initialize empty arrays for combined contours

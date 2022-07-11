@@ -67,11 +67,11 @@ class GuitarSet(GuitarSet):
                                                                         stacked_pitch_list,
                                                                         self.profile,
                                                                         times=times,
-                                                                        semitone_width=1.5,
-                                                                        stream_tolerance=1.0,
-                                                                        minimum_contour_duration=100,
+                                                                        semitone_width=1.5, # semitones
+                                                                        stream_tolerance=0.55, # semitones
+                                                                        minimum_contour_duration=6, # milliseconds
                                                                         attempt_corrections=True,
-                                                                        combine_associated_contours=True,
+                                                                        combine_associated_contours=False,
                                                                         suppress_warnings=False)
 
             # Collapse the stacked relative multi pitch array into a single representation
