@@ -359,13 +359,6 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
     # Make sure there are no null observations in the pitch list
     pitch_list = tools.clean_pitch_list(pitch_list)
 
-    if times is not None:
-        # If times given, resample the pitch list here
-        pitch_list = resample_multipitch(_times, pitch_list, times)
-    else:
-        # Use the extracted times
-        times = _times
-
     # Check if there is any overlap within the streams
     if (detect_overlap_notes(intervals) or detect_overlap_pitch_list(pitch_list)) and not suppress_warnings:
         warnings.warn('Overlapping streams were provided. Will attempt ' +
@@ -384,14 +377,11 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
     pitch_idcs = np.round(pitches - profile.low).astype(tools.INT)
 
     # Duplicate the array of times for each note and stack along a new axis
-    times = np.concatenate([[times]] * max(1, len(pitch_idcs)), axis=0)
+    _times_broadcast = np.concatenate([[_times]] * max(1, len(pitch_idcs)), axis=0)
 
     # Determine the frame where each note begins and ends
-    # TODO - if pitch list is undersampled, adjacent notes can end up having
-    #        same offset/onset frames, even though the pitch observation in
-    #        the pitch list at the frame only corresponds to one note
-    onset_idcs = np.argmin((times <= intervals[..., :1]), axis=1) - 1
-    offset_idcs = np.argmin((times < intervals[..., 1:]), axis=1) - 1
+    onset_idcs = np.argmin((_times_broadcast <= intervals[..., :1]), axis=1) - 1
+    offset_idcs = np.argmin((_times_broadcast <= intervals[..., 1:]), axis=1) - 1
 
     # Clip all offsets at last frame - they will end up at -1 from
     # previous operation if they occurred beyond last frame time
@@ -399,9 +389,6 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
 
     # Loop through each note
     for i in range(len(pitch_idcs)):
-        #if (i != len(pitch_idcs) -1) and offset_idcs[i] == onset_idcs[i + 1] and pitch_idcs[i] != pitch_idcs[i+1]:
-        #    print()
-
         # Keep track of adjusted note boundaries without modifying original values
         adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
 
@@ -461,6 +448,15 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
 
         # Populate the multi pitch array with relative deviations for the note
         relative_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = deviations
+
+    if times is not None:
+        # If times given, obtain indices to resample the multi pitch arrays
+        resample_idcs = tools.get_resample_idcs(_times, times)
+        # Reduce the multi pitch arrays to the resample indices
+        # TODO - elegant solution, but could result in notes with duration
+        #        shorter than a frame being erased if undersampled
+        relative_multi_pitch = relative_multi_pitch[..., resample_idcs]
+        adjusted_multi_pitch = adjusted_multi_pitch[..., resample_idcs]
 
     return relative_multi_pitch, adjusted_multi_pitch
 
