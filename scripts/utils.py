@@ -368,7 +368,7 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
     num_pitches = profile.get_range_len()
     num_frames = len(pitch_list)
 
-    # Initialize two empty multi pitch array for relative and adjusted multi pitch data
+    # Initialize two empty multi pitch arrays for relative and adjusted multi pitch data
     relative_multi_pitch = np.zeros((num_pitches, num_frames))
     adjusted_multi_pitch = np.zeros((num_pitches, num_frames))
 
@@ -376,87 +376,98 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
     # supported note of the instrument to obtain pitch indices
     pitch_idcs = np.round(pitches - profile.low).astype(tools.INT)
 
-    # Duplicate the array of times for each note and stack along a new axis
-    _times_broadcast = np.concatenate([[_times]] * max(1, len(pitch_idcs)), axis=0)
+    # Determine how many notes were provided
+    num_notes = len(pitch_idcs)
 
-    # Determine the frame where each note begins and ends
-    onset_idcs = np.argmin((_times_broadcast <= intervals[..., :1]), axis=1) - 1
-    offset_idcs = np.argmin((_times_broadcast <= intervals[..., 1:]), axis=1) - 1
+    # Make sure there are notes to match and the pitch list is not empty
+    if num_notes and num_frames:
+        # Duplicate the array of times for each note and stack along a new axis
+        _times_broadcast = np.concatenate([[_times]] * max(1, num_notes), axis=0)
 
-    # Clip all offsets at last frame - they will end up at -1 from
-    # previous operation if they occurred beyond last frame time
-    offset_idcs[offset_idcs == -1] = num_frames - 1
+        # Determine the frame where each note begins and ends
+        onset_idcs = np.argmin((_times_broadcast <= intervals[..., :1]), axis=1) - 1
+        offset_idcs = np.argmin((_times_broadcast <= intervals[..., 1:]), axis=1) - 1
 
-    # Loop through each note
-    for i in range(len(pitch_idcs)):
-        # Keep track of adjusted note boundaries without modifying original values
-        adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
+        # Clip all offsets at last frame - they will end up at -1 from
+        # previous operation if they occurred beyond last frame time
+        offset_idcs[offset_idcs == -1] = num_frames - 1
 
-        # Adjust the onset index to the first frame with non-empty pitch observations
-        while not len(pitch_list[adjusted_onset]) and adjusted_onset <= adjusted_offset:
-            adjusted_onset += 1
-
-        # Adjust the offset index to the last frame with non-empty pitch observations
-        while not len(pitch_list[adjusted_offset]) and adjusted_offset >= adjusted_onset:
-            adjusted_offset -= 1
-
-        # Check that there are non-empty pitch observations
-        if adjusted_onset <= adjusted_offset and len(pitch_list[adjusted_onset]):
-            # Extract the (cropped) pitch observations within the note interval
-            pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
-        else:
-            if not suppress_warnings:
-                # TODO - occurs quite frequently for notes with small
-                #        duration if the pitch list is undersampled.
-                # There are no non-empty pitch observations, throw a warning
-                warnings.warn('No pitch observations occur within the note interval. ' +
-                              'Inserting average pitch of note instead.', category=RuntimeWarning)
-            # Reset the interval to the original note boundaries
+        # Loop through each note
+        for i in range(num_notes):
+            # Keep track of adjusted note boundaries without modifying original values
             adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
-            # Populate the frames with the average pitch of the note
-            pitch_observations = [np.array([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
 
-        # Populate the multi pitch array with adjusted activations for the note
-        adjusted_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = 1
+            # Adjust the onset index to the first frame with non-empty pitch observations
+            while not len(pitch_list[adjusted_onset]) and adjusted_onset <= adjusted_offset:
+                adjusted_onset += 1
 
-        # Check if there are any empty observations remaining
-        if tools.contains_empties_pitch_list(pitch_observations) and not suppress_warnings:
-            # There are some gaps in the observations, throw a warning
-            warnings.warn('Missing pitch observations within note interval. ' +
-                          'Will attempt to interpolate gaps.', category=RuntimeWarning)
+            # Adjust the offset index to the last frame with non-empty pitch observations
+            while not len(pitch_list[adjusted_offset]) and adjusted_offset >= adjusted_onset:
+                adjusted_offset -= 1
 
-        # Convert the cropped pitch list to an array of monophonic pitches, choosing
-        # the pitch closest to the nominal value of the note if a frame is polyphonic
-        # TODO - if this function is called from the clustering variant, we already have
-        #        these and this may even be less precise in some polyphonic corner cases
-        pitch_observations = np.array([p[np.argmin(np.abs(p - pitches[i]))]
-                                       if len(p) else 0. for p in pitch_observations])
+            # Check that there are non-empty pitch observations
+            if adjusted_onset <= adjusted_offset and len(pitch_list[adjusted_onset]):
+                # Extract the (cropped) pitch observations within the note interval
+                pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
+            else:
+                if not suppress_warnings:
+                    # TODO - occurs quite frequently for notes with small
+                    #        duration if the pitch list is undersampled.
+                    # There are no non-empty pitch observations, throw a warning
+                    warnings.warn('No pitch observations occur within the note interval. ' +
+                                  'Inserting average pitch of note instead.', category=RuntimeWarning)
+                # Reset the interval to the original note boundaries
+                adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
+                # Populate the frames with the average pitch of the note
+                pitch_observations = [np.array([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
 
-        # Interpolate between gaps in pitch observations
-        pitch_observations = tools.interpolate_gaps(pitch_observations)
+            # Populate the multi pitch array with adjusted activations for the note
+            adjusted_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = 1
 
-        # Determine the nominal pitch of the note
-        nominal_pitch = round(pitches[i])
+            # Check if there are any empty observations remaining
+            if tools.contains_empties_pitch_list(pitch_observations) and not suppress_warnings:
+                # There are some gaps in the observations, throw a warning
+                warnings.warn('Missing pitch observations within note interval. ' +
+                              'Will attempt to interpolate gaps.', category=RuntimeWarning)
 
-        # Clip pitch observations such they are within supported semitone boundaries
-        pitch_observations = np.clip(pitch_observations,
-                                     a_min=nominal_pitch - semitone_width,
-                                     a_max=nominal_pitch + semitone_width)
+            # Convert the cropped pitch list to an array of monophonic pitches, choosing
+            # the pitch closest to the nominal value of the note if a frame is polyphonic
+            # TODO - if this function is called from the clustering variant, we already have
+            #        these and this may even be less precise in some polyphonic corner cases
+            pitch_observations = np.array([p[np.argmin(np.abs(p - pitches[i]))]
+                                           if len(p) else 0. for p in pitch_observations])
 
-        # Compute the deviation between the pitch observations and the nominal value
-        deviations = pitch_observations - nominal_pitch
+            # Interpolate between gaps in pitch observations
+            pitch_observations = tools.interpolate_gaps(pitch_observations)
 
-        # Populate the multi pitch array with relative deviations for the note
-        relative_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = deviations
+            # Determine the nominal pitch of the note
+            nominal_pitch = round(pitches[i])
+
+            # Clip pitch observations such they are within supported semitone boundaries
+            pitch_observations = np.clip(pitch_observations,
+                                         a_min=nominal_pitch - semitone_width,
+                                         a_max=nominal_pitch + semitone_width)
+
+            # Compute the deviation between the pitch observations and the nominal value
+            deviations = pitch_observations - nominal_pitch
+
+            # Populate the multi pitch array with relative deviations for the note
+            relative_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = deviations
 
     if times is not None:
         # If times given, obtain indices to resample the multi pitch arrays
         resample_idcs = tools.get_resample_idcs(_times, times)
-        # Reduce the multi pitch arrays to the resample indices
-        # TODO - elegant solution, but could result in notes with duration
-        #        shorter than a frame being erased if undersampled
-        relative_multi_pitch = relative_multi_pitch[..., resample_idcs]
-        adjusted_multi_pitch = adjusted_multi_pitch[..., resample_idcs]
+
+        if resample_idcs is None:
+            # Initialize empty arrays with the expected number of frames
+            relative_multi_pitch = np.zeros((num_pitches, len(times)))
+            adjusted_multi_pitch = np.zeros((num_pitches, len(times)))
+        else:
+            # Reduce the multi pitch arrays to the resample indices
+            # TODO - elegant solution, but could result in notes with duration
+            #        shorter than a frame being erased if undersampled
+            relative_multi_pitch = relative_multi_pitch[..., resample_idcs]
+            adjusted_multi_pitch = adjusted_multi_pitch[..., resample_idcs]
 
     return relative_multi_pitch, adjusted_multi_pitch
 
