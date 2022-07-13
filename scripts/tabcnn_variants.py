@@ -3,15 +3,18 @@ from amt_tools.models import TabCNN, LogisticBank
 
 import amt_tools.tools as tools
 
+import constants
+
 
 class TabCNNMultipitch(TabCNN):
     """
-    Implements TabCNN for multipitch estimation instead of tablature estimation.
+    Implements TabCNN for discrete multipitch estimation instead of tablature estimation.
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1, device='cpu'):
         """
         Initialize the model and replace the final layer.
+
         Parameters
         ----------
         See TabCNN class...
@@ -19,18 +22,22 @@ class TabCNNMultipitch(TabCNN):
 
         super().__init__(dim_in, profile, in_channels, model_complexity, device)
 
-        # Determine the number of input neurons to the current softmax layer
-        n_neurons = self.dense[-1].dim_in
+        # Break off the output layer to establish an explicit reference
+        tablature_layer, self.dense = self.dense[-1], self.dense[:-1]
+
+        # Determine the number of input neurons to the current tablature layer
+        n_neurons = tablature_layer.dim_in
 
         # Determine the number of distinct pitches
         n_multipitch = self.profile.get_range_len()
 
-        # Create a layer for multipitch estimation and replace the tablature layer
-        self.dense[-1] = LogisticBank(n_neurons, n_multipitch)
+        # Create a layer for multipitch estimation to replace the tablature layer
+        self.multipitch_layer = LogisticBank(n_neurons, n_multipitch)
 
     def forward(self, feats):
         """
         Perform the main processing steps for the variant.
+
         Parameters
         ----------
         feats : Tensor (B x T x F x W)
@@ -39,31 +46,37 @@ class TabCNNMultipitch(TabCNN):
           T - number of frames
           F - number of features (frequency bins)
           W - frame width of each sample
+
         Returns
         ----------
         output : dict w/ multipitch Tensor (B x T x O)
-          Dictionary containing tablature output
+          Dictionary containing model output
           B - batch size,
           T - number of time steps (frames),
-          O - number of output neurons (dim_out)
+          O - number of discrete pitches (dim_out)
         """
 
-        # Run the standard steps
+        # Run the standard steps to extract output embeddings
         output = super().forward(feats)
 
-        # Correct the label from tablature to multipitch
-        output[tools.KEY_MULTIPITCH] = output.pop(tools.KEY_TABLATURE)
+        # Extract the embeddings from the output dictionary (labeled as tablature)
+        embeddings = output.pop(tools.KEY_TABLATURE)
+
+        # Process the embeddings with the multipitch output layer
+        output[tools.KEY_MULTIPITCH] = self.multipitch_layer(embeddings)
 
         return output
 
     def post_proc(self, batch):
         """
         Calculate multipitch loss and finalize model output.
+
         Parameters
         ----------
         batch : dict
           Dictionary including model output and potentially
           ground-truth for a group of tracks
+
         Returns
         ----------
         output : dict
@@ -72,9 +85,6 @@ class TabCNNMultipitch(TabCNN):
 
         # Extract the raw output
         output = batch[tools.KEY_OUTPUT]
-
-        # Obtain a pointer to the output layer
-        multipitch_output_layer = self.dense[-1]
 
         # Obtain the multipitch estimation
         multipitch_est = output[tools.KEY_MULTIPITCH]
@@ -85,27 +95,29 @@ class TabCNNMultipitch(TabCNN):
         # Check to see if ground-truth multipitch is available
         if tools.KEY_MULTIPITCH in batch.keys():
             # Calculate the loss and add it to the total
-            total_loss += multipitch_output_layer.get_loss(multipitch_est, batch[tools.KEY_MULTIPITCH])
+            total_loss += self.multipitch_layer.get_loss(multipitch_est, batch[tools.KEY_MULTIPITCH])
 
         if total_loss:
             # Add the loss to the output dictionary
-            output[tools.KEY_LOSS] = {tools.KEY_MULTIPITCH : total_loss,
+            output[tools.KEY_LOSS] = {tools.KEY_MULTIPITCH : total_loss.clone(),
                                       tools.KEY_LOSS_TOTAL : total_loss}
 
-        # Finalize multipitch estimation
-        output[tools.KEY_MULTIPITCH] = multipitch_output_layer.finalize_output(multipitch_est)
+        # Finalize multipitch estimation by taking sigmoid and thresholding activations
+        output[tools.KEY_MULTIPITCH] = self.multipitch_layer.finalize_output(multipitch_est, 0.5)
 
         return output
 
 
-class TabCNNMultipitchRegression(TabCNNMultipitch):
+class TabCNNContinuousMultipitch(TabCNNMultipitch):
     """
-    Implements TabCNN for multipitch estimation instead of tablature estimation.
+    Implements TabCNN for continuous multipitch estimation.
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1, device='cpu'):
         """
-        Initialize the model and replace the final layer.
+        Initialize the model and include an additional output
+        layer for the estimation of relative pitch deviation.
+
         Parameters
         ----------
         See TabCNN class...
@@ -113,17 +125,14 @@ class TabCNNMultipitchRegression(TabCNNMultipitch):
 
         super().__init__(dim_in, profile, in_channels, model_complexity, device)
 
-        # Create a new field for easy access
-        self.multipitch_layer = self.dense[-1]
-
-        # Create a layer of the same size for estimating relative pitch
-        self.relative_layer = self.multipitch_layer.copy()
-
-        print()
+        # Create another output layer to estimate relative pitch deviation
+        self.relative_layer = LogisticBank(self.multipitch_layer.dim_in,
+                                           self.multipitch_layer.dim_out)
 
     def forward(self, feats):
         """
         Perform the main processing steps for the variant.
+
         Parameters
         ----------
         feats : Tensor (B x T x F x W)
@@ -132,41 +141,49 @@ class TabCNNMultipitchRegression(TabCNNMultipitch):
           T - number of frames
           F - number of features (frequency bins)
           W - frame width of each sample
+
         Returns
         ----------
-        output : dict w/ multipitch Tensor (B x T x O)
-          Dictionary containing tablature output
+        output : dict w/ multipitch/relative Tensors (both B x T x O)
+          Dictionary containing model output
           B - batch size,
           T - number of time steps (frames),
-          O - number of output neurons (dim_out)
+          O - number of discrete pitches (dim_out)
         """
 
-        # Run the standard steps
-        output = super().forward(feats)
+        # Run the standard steps to extract output embeddings
+        output = TabCNN.forward(self, feats)
 
-        # TODO - estimate relative pitch here
+        # Extract the embeddings from the output dictionary (labeled as tablature)
+        embeddings = output.pop(tools.KEY_TABLATURE)
+
+        # Process the embeddings with both output layers
+        output[tools.KEY_MULTIPITCH] = self.multipitch_layer(embeddings)
+        output[constants.KEY_MULTIPITCH_REL] = self.relative_layer(embeddings)
 
         return output
 
     def post_proc(self, batch):
         """
-        Calculate multipitch loss and finalize model output.
+        Calculate multipitch and relative loss and finalize model output.
+
         Parameters
         ----------
         batch : dict
           Dictionary including model output and potentially
           ground-truth for a group of tracks
+
         Returns
         ----------
         output : dict
-          Dictionary containing multipitch and potentially loss
+          Dictionary containing multipitch, relative deviation, and potentially loss
         """
 
-        # Calculate tablature loss
+        # Calculate multipitch loss
         output = super().post_proc(batch)
 
-        # Extract the raw output
-        output = batch[tools.KEY_OUTPUT]
+        # Obtain the relative pitch deviation estimates
+        relative_est = output[constants.KEY_MULTIPITCH_REL]
 
         # Unpack the loss if it exists
         loss = tools.unpack_dict(output, tools.KEY_LOSS)
@@ -175,5 +192,23 @@ class TabCNNMultipitchRegression(TabCNNMultipitch):
         if loss is None:
             # Create a new dictionary to hold the loss
             loss = {}
+
+        # Check to see if ground-truth relative multipitch is available
+        if constants.KEY_MULTIPITCH_REL in batch.keys():
+            # Compute the loss for the relative pitch deviation
+            relative_loss = self.relative_layer.get_loss(relative_est, batch[constants.KEY_MULTIPITCH_REL])
+            # Add the relative pitch deviation loss to the tracked loss dictionary
+            loss[constants.KEY_LOSS_PITCH_REL] = relative_loss
+            # Add the relative pitch deviation loss to the total loss
+            total_loss += relative_loss
+
+        # Determine if loss is being tracked
+        if total_loss:
+            # Add the loss to the output dictionary
+            loss[tools.KEY_LOSS_TOTAL] = total_loss
+            output[tools.KEY_LOSS] = loss
+
+        # Finalize the relative pitch deviation estimates by zero-centering and scaling between -1 and 1
+        output[constants.KEY_MULTIPITCH_REL] = 2 * (self.relative_layer.finalize_output(relative_est) - 0.5)
 
         return output

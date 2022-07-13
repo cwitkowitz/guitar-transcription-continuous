@@ -1,7 +1,7 @@
 # Author: Frank Cwitkowitz <fcwitkow@ur.rochester.edu>
 
 # My imports
-from tabcnn_variants import TabCNNMultipitchRegression as TabCNN
+from tabcnn_variants import TabCNNContinuousMultipitch as TabCNN
 from GuitarSet import GuitarSet
 #from amt_tools.models import TabCNN
 from amt_tools.features import CQT
