@@ -4,6 +4,7 @@
 from amt_tools.datasets import GuitarSet, TranscriptionDataset
 
 import amt_tools.tools as tools
+
 import constants
 import utils
 
@@ -13,8 +14,24 @@ from copy import deepcopy
 
 class GuitarSet(GuitarSet):
     """
-    Simple wrapper to additionally include notes and relative pitch deviation in ground-truth.
+    Simple wrapper to additionally include notes and continuous pitch information in ground-truth.
     """
+
+    def __init__(self, semitone_width=0.5, **kwargs):
+        """
+        Initialize the dataset variant.
+
+        Parameters
+        ----------
+        See GuitarSet class for others...
+
+        semitone_width : float
+          Scaling factor for relative pitch estimates
+        """
+
+        super().__init__(**kwargs)
+
+        self.semitone_width = semitone_width
 
     def load(self, track):
         """
@@ -72,7 +89,7 @@ class GuitarSet(GuitarSet):
                                                                         stacked_pitch_list,
                                                                         self.profile,
                                                                         times=times,
-                                                                        semitone_width=1.5, # semitones
+                                                                        semitone_width=self.semitone_width, # semitones
                                                                         stream_tolerance=0.55, # semitones
                                                                         minimum_contour_duration=6, # milliseconds
                                                                         attempt_corrections=True,

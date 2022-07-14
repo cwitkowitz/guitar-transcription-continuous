@@ -7,7 +7,8 @@ from GuitarSet import GuitarSet
 from amt_tools.features import CQT
 
 from amt_tools.train import train
-from amt_tools.transcribe import *
+from amt_tools.transcribe import ComboEstimator, NoteTranscriber
+from inference import PitchListWrapper
 from amt_tools.evaluate import *
 
 import amt_tools.tools as tools
@@ -24,7 +25,7 @@ EX_NAME = '_'.join([TabCNN.model_name(),
                     GuitarSet.dataset_name(),
                     CQT.features_name()])
 
-ex = Experiment('TabCNN (Multipitch) w/ CQT on GuitarSet w/ 6-fold Cross Validation')
+ex = Experiment('TabCNN (Continuous Multipitch) w/ CQT on GuitarSet w/ 6-fold Cross Validation')
 
 
 @ex.config
@@ -82,6 +83,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
     # Processing parameters
     dim_in = 192
     model_complexity = 1
+    semitone_width = 1.5
 
     # Create the cqt data processing module
     data_proc = CQT(sample_rate=sample_rate,
@@ -148,7 +150,8 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                    num_frames=num_frames,
                                    data_proc=data_proc,
                                    profile=profile,
-                                   save_loc=gset_cache)
+                                   save_loc=gset_cache,
+                                   semitone_width=semitone_width)
 
             # Create a PyTorch data loader for the dataset
             train_loader = DataLoader(dataset=gset_train,
@@ -168,7 +171,8 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                   data_proc=data_proc,
                                   profile=profile,
                                   store_data=False,
-                                  save_loc=gset_cache)
+                                  save_loc=gset_cache,
+                                  semitone_width=semitone_width)
 
             if validation_split:
                 print(f'Loading validation partition (player {val_hold_out})...')
@@ -182,13 +186,19 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                      data_proc=data_proc,
                                      profile=profile,
                                      store_data=True,
-                                     save_loc=gset_cache)
+                                     save_loc=gset_cache,
+                                     semitone_width=semitone_width)
             else:
                 # Validate on the test set
                 gset_val = gset_test
 
             # Initialize a new instance of the model
-            tabcnn = TabCNN(dim_in, profile, data_proc.get_num_channels(), model_complexity, gpu_id)
+            tabcnn = TabCNN(dim_in=dim_in,
+                            profile=profile,
+                            in_channels=data_proc.get_num_channels(),
+                            semitone_width=semitone_width,
+                            model_complexity=model_complexity,
+                            device=gpu_id)
             tabcnn.change_device()
             tabcnn.train()
 

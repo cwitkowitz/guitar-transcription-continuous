@@ -115,17 +115,22 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
     Implements TabCNN for continuous multipitch estimation.
     """
 
-    def __init__(self, dim_in, profile, in_channels, model_complexity=1, device='cpu'):
+    def __init__(self, dim_in, profile, in_channels, semitone_width=0.5, model_complexity=1, device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
 
         Parameters
         ----------
-        See TabCNN class...
+        See TabCNN class for others...
+
+        semitone_width : float
+          Scaling factor for relative pitch estimates
         """
 
         super().__init__(dim_in, profile, in_channels, model_complexity, device)
+
+        self.semitone_width = semitone_width
 
         # Create another output layer to estimate relative pitch deviation
         self.relative_layer = LogisticBank(self.multipitch_layer.dim_in,
@@ -197,9 +202,12 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
 
         # Check to see if ground-truth relative multipitch is available
         if constants.KEY_MULTIPITCH_REL in batch.keys():
+            # Normalize the ground-truth relative multi pitch data (-1, 1)
+            normalized_relative_multi_pitch = batch[constants.KEY_MULTIPITCH_REL] / self.semitone_width
+            # Compress the relative multi pitch data to fit within sigmoid range (0, 1)
+            compressed_relative_multi_pitch = (normalized_relative_multi_pitch + 1) / 2
             # Compute the loss for the relative pitch deviation
-            relative_loss = self.relative_layer.get_loss(relative_est,
-                                                         batch[constants.KEY_MULTIPITCH_REL])
+            relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_multi_pitch)
             # Add the relative pitch deviation loss to the tracked loss dictionary
             loss[constants.KEY_LOSS_PITCH_REL] = relative_loss
             # Add the relative pitch deviation loss to the total loss
@@ -211,7 +219,10 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
             loss[tools.KEY_LOSS_TOTAL] = total_loss
             output[tools.KEY_LOSS] = loss
 
-        # Finalize the relative pitch deviation estimates by zero-centering and scaling between -1 and 1
-        output[constants.KEY_MULTIPITCH_REL] = 2 * (self.relative_layer.finalize_output(relative_est) - 0.5)
+        # Normalize relative multi pitch estimates between (-1, 1)
+        relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
+
+        # Finalize the estimates by re-scaling to the chosen semitone width
+        output[constants.KEY_MULTIPITCH_REL] = self.semitone_width * relative_est
 
         return output

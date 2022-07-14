@@ -116,6 +116,13 @@ class PitchContour(object):
 class ContourTracker(object):
     """
     Class to maintain state while parsing pitch lists to track pitch contours.
+
+    TODO - this is an excellent place to resample a pitch list that should avoid
+           the pitfalls of undersampling; after tracking contours, can linearly
+           interpolate them to obtain pitch observations at arbitrary times. Then,
+           can take a collection of arbitrary times and attempt to place pitches
+           that occur within frame times rather than pitches that occur at frame
+           times!!
     """
 
     def __init__(self):
@@ -455,6 +462,7 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
             relative_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = deviations
 
     if times is not None:
+        # TODO - it might make more sense to do this outside of the function for more modularity
         # If times given, obtain indices to resample the multi pitch arrays
         resample_idcs = tools.get_resample_idcs(_times, times)
 
@@ -767,6 +775,60 @@ def stacked_relative_multi_pitch_to_relative_multi_pitch(stacked_relative_multi_
         adjusted_multi_pitch_count[adjusted_multi_pitch_count > 0]
 
     return relative_multi_pitch
+
+
+def continuous_multi_pitch_to_pitch_list(discrete_multi_pitch, relative_multi_pitch, profile):
+    """
+    Convert discrete and relative multi pitch arrays into a pitch list.
+
+    Parameters
+    ----------
+    discrete_multi_pitch : ndarray (F x T)
+      Discrete pitch activation map
+      F - number of discrete pitches
+      T - number of frames
+    relative_multi_pitch : ndarray (F x T)
+      Relative pitch deviations anchored to discrete pitches
+      F - number of discrete pitches
+      T - number of frames
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
+
+    Returns
+    ----------
+    pitch_list : list of ndarray (T x [...])
+      Frame-level observations detailing active pitches
+      T - number of frames
+    """
+
+    # Determine the number of frames in the multi pitch array
+    num_frames = discrete_multi_pitch.shape[-1]
+
+    # Initialize empty pitch arrays for each time entry
+    pitch_list = [np.empty(0)] * num_frames
+
+    # Determine which frames contain pitch activity
+    non_silent_frames = np.where(np.sum(discrete_multi_pitch, axis=-2) > 0)[-1]
+
+    # Loop through the frames containing pitch activity
+    for i in list(non_silent_frames):
+        # Determine the MIDI pitches active in the frame
+        pitch_idcs = np.where(discrete_multi_pitch[..., i])[-1]
+        # Compute the continuous pitches for the frame and add to the list
+        pitch_list[i] = profile.low + pitch_idcs + relative_multi_pitch[pitch_idcs, i]
+
+    return pitch_list
+
+
+def stacked_continuous_multi_pitch_to_stacked_pitch_list(stacked_discrete_multi_pitch,
+                                                         stacked_relative_multi_pitch, profile):
+    """
+    TODO
+    """
+
+    stacked_pitch_list = None
+
+    return stacked_pitch_list
 
 
 ##################################################
