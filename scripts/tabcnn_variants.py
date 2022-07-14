@@ -94,8 +94,10 @@ class TabCNNMultipitch(TabCNN):
 
         # Check to see if ground-truth multipitch is available
         if tools.KEY_MULTIPITCH in batch.keys():
-            # Calculate the loss and add it to the total
-            total_loss += self.multipitch_layer.get_loss(multipitch_est, batch[tools.KEY_MULTIPITCH])
+            # Calculate the loss and add it to the total (note that loss is computed
+            # w.r.t. the multi pitch adjusted to match the ground-truth pitch contours)
+            total_loss += self.multipitch_layer.get_loss(multipitch_est,
+                                                         batch[constants.KEY_MULTIPITCH_ADJ])
 
         if total_loss:
             # Add the loss to the output dictionary
@@ -196,7 +198,8 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         # Check to see if ground-truth relative multipitch is available
         if constants.KEY_MULTIPITCH_REL in batch.keys():
             # Compute the loss for the relative pitch deviation
-            relative_loss = self.relative_layer.get_loss(relative_est, batch[constants.KEY_MULTIPITCH_REL])
+            relative_loss = self.relative_layer.get_loss(relative_est,
+                                                         batch[constants.KEY_MULTIPITCH_REL])
             # Add the relative pitch deviation loss to the tracked loss dictionary
             loss[constants.KEY_LOSS_PITCH_REL] = relative_loss
             # Add the relative pitch deviation loss to the total loss
