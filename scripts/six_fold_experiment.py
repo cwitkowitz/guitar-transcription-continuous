@@ -2,7 +2,7 @@
 
 # My imports
 from tabcnn_variants import TabCNNContinuousMultipitch as TabCNN
-from GuitarSet import GuitarSet
+from GuitarSet import GuitarSetPlus as GuitarSet
 #from amt_tools.models import TabCNN
 from amt_tools.features import CQT
 
@@ -151,7 +151,8 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                    data_proc=data_proc,
                                    profile=profile,
                                    save_loc=gset_cache,
-                                   semitone_width=semitone_width)
+                                   semitone_width=semitone_width,
+                                   augment=False)
 
             # Create a PyTorch data loader for the dataset
             train_loader = DataLoader(dataset=gset_train,
@@ -211,7 +212,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
             model_dir = os.path.join(root_dir, 'models', 'fold-' + str(k))
 
             # Set validation patterns for training
-            validation_evaluator.set_patterns(['loss', 'f1', 'tdr', 'acc'])
+            validation_evaluator.set_patterns(['loss', 'pr', 're', 'f1', 'tdr', 'acc'])
 
             # Train the model
             tabcnn = train(model=tabcnn,
