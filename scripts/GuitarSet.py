@@ -122,7 +122,7 @@ class GuitarSetPlus(GuitarSet):
             #tablature = tools.stacked_multi_pitch_to_tablature(stacked_multi_pitch, self.profile)
 
             # Load the string-wise pitch annotations from the JAMS data
-            stacked_pitch_list = tools.extract_stacked_pitch_list_jams(jams_path)
+            stacked_pitch_list = tools.extract_stacked_pitch_list_jams(jams_data)
             stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
 
             # Collapse the stacked pitch list into a single representation

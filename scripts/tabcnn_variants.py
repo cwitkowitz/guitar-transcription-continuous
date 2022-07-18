@@ -1,9 +1,12 @@
 # My imports
-from amt_tools.models import TabCNN, LogisticBank
+from amt_tools.models import TabCNN, OutputLayer, LogisticBank
 
 import amt_tools.tools as tools
 
 import constants
+
+# Regular imports
+import torch
 
 
 class TabCNNMultipitch(TabCNN):
@@ -115,7 +118,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
     Implements TabCNN for continuous multipitch estimation.
     """
 
-    def __init__(self, dim_in, profile, in_channels, semitone_width=0.5, model_complexity=1, device='cpu'):
+    def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_width=0.5, lmbda=1, device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
@@ -126,15 +129,18 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
 
         semitone_width : float
           Scaling factor for relative pitch estimates
+        lmbda : float
+          Multiplier for the relative pitch deviation loss
         """
 
         super().__init__(dim_in, profile, in_channels, model_complexity, device)
 
         self.semitone_width = semitone_width
+        self.lmbda = lmbda
 
         # Create another output layer to estimate relative pitch deviation
-        self.relative_layer = LogisticBank(self.multipitch_layer.dim_in,
-                                           self.multipitch_layer.dim_out)
+        self.relative_layer = CBernoulliBank(self.multipitch_layer.dim_in,
+                                             self.multipitch_layer.dim_out)
 
     def forward(self, feats):
         """
@@ -210,8 +216,8 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
             relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_multi_pitch)
             # Add the relative pitch deviation loss to the tracked loss dictionary
             loss[constants.KEY_LOSS_PITCH_REL] = relative_loss
-            # Add the relative pitch deviation loss to the total loss
-            total_loss += relative_loss
+            # Add the (scaled) relative pitch deviation loss to the total loss
+            total_loss += self.lmbda * relative_loss
 
         # Determine if loss is being tracked
         if total_loss:
@@ -226,3 +232,95 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         output[constants.KEY_MULTIPITCH_REL] = self.semitone_width * relative_est
 
         return output
+
+
+class CBernoulliBank(LogisticBank):
+    """
+    Implements a multi-label Continuous Bernoulli output layer.
+    """
+
+    def __init__(self, dim_in, dim_out):
+        """
+        Initialize fields of the multi-label Continuous Bernoulli layer.
+
+        Parameters
+        ----------
+        See LogisticBank class...
+        """
+
+        super().__init__(dim_in, dim_out, None)
+
+    def get_loss(self, estimated, reference):
+        """
+        Compute the negative log-likelihood of the ground-truth w.r.t.
+        distributions parameterized by the estimated continuous values.
+
+        Parameters
+        ----------
+        estimated : Tensor (B x T x O)
+          estimated logits for a batch of tracks
+          B - batch size,
+          T - number of time steps (frames),
+          O - number of output neurons (dim_out)
+        reference : Tensor (B x O x T)
+          ground-truth continuous values for a batch of tracks
+          B - batch size,
+          O - number of output neurons (dim_out),
+          T - number of time steps (frames)
+
+        Returns
+        ----------
+        loss : Tensor (1-D)
+          Loss or error for entire batch
+        """
+
+        # Make clones so as not to modify originals out of function scope
+        estimated = estimated.clone()
+        reference = reference.clone()
+
+        # Switch the frame and key dimension
+        estimated = estimated.transpose(-2, -1)
+
+        # Obtain Continuous Bernoulli distributions parameterized by the estimated logits
+        distributions = torch.distributions.ContinuousBernoulli(logits=estimated.float())
+        # Compute the negative log likelihood of the ground-truth w.r.t. the distributions
+        loss = -distributions.log_prob(reference.float())
+
+        # Average loss across frames
+        loss = torch.mean(loss, dim=-1)
+        # Sum loss across keys
+        loss = torch.sum(loss, dim=-1)
+        # Average loss across the batch
+        loss = torch.mean(loss)
+
+        return loss
+
+    def finalize_output(self, raw_output):
+        """
+        Convert output logits into actual continuous value predictions.
+
+        Parameters
+        ----------
+        raw_output : Tensor (B x T x O)
+          Raw logits used for calculating loss
+          B - batch size,
+          T - number of time steps (frames),
+          O - number of output neurons (dim_out)
+
+        Returns
+        ----------
+        final_output : Tensor (B x O x T)
+          Continuous values serving as final predictions
+          B - batch size,
+          O - number of output neurons (dim_out),
+          T - number of time steps (frames)
+        """
+
+        final_output = OutputLayer.finalize_output(self, raw_output)
+
+        # Obtain mean of the distributions parameterized by the estimated logits
+        final_output = torch.distributions.ContinuousBernoulli(logits=final_output).mean
+        # Switch the frame and key dimension
+        final_output = final_output.transpose(-2, -1)
+
+        return final_output
