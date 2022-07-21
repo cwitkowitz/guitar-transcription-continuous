@@ -1,4 +1,5 @@
 # My imports
+from guitar_transcription_inhibition.models import TabCNNRecurrent
 from amt_tools.models import TabCNN, OutputLayer, LogisticBank
 
 import amt_tools.tools as tools
@@ -6,6 +7,8 @@ import amt_tools.tools as tools
 import constants
 
 # Regular imports
+from abc import abstractmethod
+
 import torch
 
 
@@ -118,7 +121,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
     Implements TabCNN for continuous multipitch estimation.
     """
 
-    def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_width=0.5, lmbda=1, device='cpu'):
+    def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_width=0.5, gamma=1, device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
@@ -129,14 +132,14 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
 
         semitone_width : float
           Scaling factor for relative pitch estimates
-        lmbda : float
-          Multiplier for the relative pitch deviation loss
+        gamma : float
+          Inverse scaling multiplier for the discrete multipitch loss
         """
 
         super().__init__(dim_in, profile, in_channels, model_complexity, device)
 
         self.semitone_width = semitone_width
-        self.lmbda = lmbda
+        self.gamma = gamma
 
         # Create another output layer to estimate relative pitch deviation
         self.relative_layer = CBernoulliBank(self.multipitch_layer.dim_in,
@@ -216,8 +219,8 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
             relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_multi_pitch)
             # Add the relative pitch deviation loss to the tracked loss dictionary
             loss[constants.KEY_LOSS_PITCH_REL] = relative_loss
-            # Add the (scaled) relative pitch deviation loss to the total loss
-            total_loss += self.lmbda * relative_loss
+            # Add the relative pitch deviation loss to the (scaled) total loss
+            total_loss = (1 / self.gamma) * total_loss + relative_loss
 
         # Determine if loss is being tracked
         if total_loss:
@@ -234,14 +237,14 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         return output
 
 
-class CBernoulliBank(LogisticBank):
+class ContinuousBank(LogisticBank):
     """
-    Implements a multi-label Continuous Bernoulli output layer.
+    Implements a multi-label continuous-valued [0, 1] output layer.
     """
 
     def __init__(self, dim_in, dim_out):
         """
-        Initialize fields of the multi-label Continuous Bernoulli layer.
+        Initialize fields of the output layer.
 
         Parameters
         ----------
@@ -249,6 +252,60 @@ class CBernoulliBank(LogisticBank):
         """
 
         super().__init__(dim_in, dim_out, None)
+
+
+class L2LogisticBank(ContinuousBank):
+    """
+    Implements a multi-label continuous-valued [0, 1] output layer with MSE loss.
+    """
+
+    def get_loss(self, estimated, reference):
+        """
+        Compute the mean-squared error of the estimated values relative to the ground-truth.
+
+        Parameters
+        ----------
+        estimated : Tensor (B x T x O)
+          estimated logits for a batch of tracks
+          B - batch size,
+          T - number of time steps (frames),
+          O - number of output neurons (dim_out)
+        reference : Tensor (B x O x T)
+          ground-truth continuous values [0, 1] for a batch of tracks
+          B - batch size,
+          O - number of output neurons (dim_out),
+          T - number of time steps (frames)
+
+        Returns
+        ----------
+        mse : Tensor (1-D)
+          Mean-squared error for entire batch
+        """
+
+        # Make clones so as not to modify originals out of function scope
+        estimated = estimated.clone()
+        reference = reference.clone()
+
+        # Switch the frame and key dimension
+        estimated = estimated.transpose(-2, -1)
+
+        # Compute the mean squared error relative to the ground-truth
+        mse = torch.abs(reference.float() - torch.sigmoid(estimated.float())) ** 2
+
+        # Average mean squared error across frames
+        mse = torch.mean(mse, dim=-1)
+        # Sum mean squared error across keys
+        mse = torch.sum(mse, dim=-1)
+        # Average mean squared error across the batch
+        mse = torch.mean(mse)
+
+        return mse
+
+
+class CBernoulliBank(ContinuousBank):
+    """
+    Implements a multi-label Continuous Bernoulli output layer.
+    """
 
     def get_loss(self, estimated, reference):
         """
@@ -263,15 +320,15 @@ class CBernoulliBank(LogisticBank):
           T - number of time steps (frames),
           O - number of output neurons (dim_out)
         reference : Tensor (B x O x T)
-          ground-truth continuous values for a batch of tracks
+          ground-truth continuous values [0, 1] for a batch of tracks
           B - batch size,
           O - number of output neurons (dim_out),
           T - number of time steps (frames)
 
         Returns
         ----------
-        loss : Tensor (1-D)
-          Loss or error for entire batch
+        nll : Tensor (1-D)
+          Negative log-likelihood for entire batch
         """
 
         # Make clones so as not to modify originals out of function scope
@@ -284,16 +341,16 @@ class CBernoulliBank(LogisticBank):
         # Obtain Continuous Bernoulli distributions parameterized by the estimated logits
         distributions = torch.distributions.ContinuousBernoulli(logits=estimated.float())
         # Compute the negative log likelihood of the ground-truth w.r.t. the distributions
-        loss = -distributions.log_prob(reference.float())
+        nll = -distributions.log_prob(reference.float())
 
-        # Average loss across frames
-        loss = torch.mean(loss, dim=-1)
-        # Sum loss across keys
-        loss = torch.sum(loss, dim=-1)
-        # Average loss across the batch
-        loss = torch.mean(loss)
+        # Average negative log likelihood across frames
+        nll = torch.mean(nll, dim=-1)
+        # Sum negative log likelihood across keys
+        nll = torch.sum(nll, dim=-1)
+        # Average negative log likelihood across the batch
+        nll = torch.mean(nll)
 
-        return loss
+        return nll
 
     def finalize_output(self, raw_output):
         """
