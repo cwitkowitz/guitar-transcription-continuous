@@ -51,10 +51,9 @@ class GuitarSetPlus(GuitarSet):
         kwargs.update({'base_dir' : base_dir})
 
         if self.augment:
-            # Make sure there is no file storing/saving, since
-            # ground-truth/features will change every iteration
+            # Make sure there is no fixed data storage in RAM, since
+            # ground-truth and features will change every iteration
             kwargs.update({'store_data': False})
-            kwargs.update({'save_data': False})
 
         super().__init__(**kwargs)
 
@@ -73,8 +72,27 @@ class GuitarSetPlus(GuitarSet):
           Dictionary with ground-truth for the track
         """
 
+        # Default the amount of pitch shifting to 0 semitones
+        semitone_shift = 0
+
+        if self.augment:
+            # Construct the path to the track's JAMS data
+            jams_path = self.get_jams_path(track)
+
+            # Load the original jams data
+            jams_data = jams.load(jams_path)
+
+            # Load the original notes by string from the JAMS data
+            stacked_notes = tools.extract_stacked_notes_jams(jams_data)
+
+            # Sample a valid semitone shift according to the pre-existing notes in the track
+            semitone_shift = sample_valid_pitch_shift(stacked_notes, self.profile, 5, self.rng)
+
+        # Update the track name to reflect any augmentation
+        track_ = track + f'_{semitone_shift}'
+
         # Load the track data if it exists in memory, otherwise instantiate track data
-        data = TranscriptionDataset.load(self, track)
+        data = TranscriptionDataset.load(self, track_)
 
         # If the track data is being instantiated, it will not have the 'audio' key
         if not tools.query_dict(data, tools.KEY_AUDIO):
@@ -86,21 +104,15 @@ class GuitarSetPlus(GuitarSet):
             # We need the frame times for the tablature
             times = self.data_proc.get_times(audio)
 
-            # Construct the path to the track's JAMS data
-            jams_path = self.get_jams_path(track)
+            if not self.augment:
+                # Construct the path to the track's JAMS data
+                jams_path = self.get_jams_path(track)
 
-            # Load the original jams data
-            jams_data = jams.load(jams_path)
-
-            if self.augment:
+                # Load the original jams data
+                jams_data = jams.load(jams_path)
+            else:
                 # Add the audio to the jams data
                 jams_data = muda.jam_pack(jams_data, _audio=dict(y=audio, sr=fs))
-
-                # Load the original notes by string from the JAMS data
-                stacked_notes = tools.extract_stacked_notes_jams(jams_data)
-
-                # Sample a valid semitone shift according to the pre-existing notes in the track
-                semitone_shift = sample_valid_pitch_shift(stacked_notes, self.profile, 5, self.rng)
 
                 # Apply a pitch shift transformation to the audio and annotations
                 jams_data = next(muda.deformers.PitchShift(n_semitones=semitone_shift).transform(jams_data))
@@ -164,9 +176,9 @@ class GuitarSetPlus(GuitarSet):
                          constants.KEY_MULTIPITCH_REL : relative_multi_pitch,
                          tools.KEY_NOTES : batched_notes})
 
-            if self.save_data and not self.augment:
+            if self.save_data:
                 # Get the appropriate path for saving the track data
-                gt_path = self.get_gt_dir(track)
+                gt_path = self.get_gt_dir(track_)
 
                 # Create a copy of the data
                 data_to_save = deepcopy(data)
@@ -232,6 +244,6 @@ def sample_valid_pitch_shift(stacked_notes, profile, steepness=5, rng=None):
     norm_weights = relative_weights / np.sum(relative_weights)
 
     # Sample a semitone shift within the valid range using the computed probabilities
-    semitone_shift = rng.choice(valid_range, p=norm_weights)
+    semitone_shift = int(rng.choice(valid_range, p=norm_weights))
 
     return semitone_shift
