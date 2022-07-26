@@ -17,8 +17,8 @@ import os
 sample_rate = 22050
 hop_length = 512
 
-# Save plot one level up
-save_dir = os.path.join('..', 'generated')
+# Save plot one level up under visualization directory
+save_dir = os.path.join('..', 'generated', 'visualization', 'powers')
 os.makedirs(save_dir, exist_ok=True)
 
 # Compute features as frame-level signal power
