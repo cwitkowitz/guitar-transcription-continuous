@@ -107,7 +107,7 @@ class TabCNNMultipitch(TabCNN):
 
         if total_loss:
             # Add the loss to the output dictionary
-            output[tools.KEY_LOSS] = {tools.KEY_MULTIPITCH : total_loss.clone(),
+            output[tools.KEY_LOSS] = {tools.KEY_LOSS_PITCH : total_loss.clone(),
                                       tools.KEY_LOSS_TOTAL : total_loss}
 
         # Finalize multipitch estimation by taking sigmoid and thresholding activations

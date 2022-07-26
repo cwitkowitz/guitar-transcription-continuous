@@ -27,6 +27,8 @@ class PitchListWrapper(PitchListWrapper):
         """
         Convert continuous multi pitch activation maps to a pitch list.
 
+        TODO - eventually, this should replace the parent function altogether
+
         Parameters
         ----------
         raw_output : dict
@@ -51,12 +53,13 @@ class PitchListWrapper(PitchListWrapper):
         # Obtain the relative multi pitch activation map
         relative_multi_pitch = tools.unpack_dict(raw_output, constants.KEY_MULTIPITCH_REL)
 
-        # Perform the conversion
-        pitch_list = utils.continuous_multi_pitch_to_pitch_list(discrete_multi_pitch,
-                                                                relative_multi_pitch,
-                                                                self.profile)
-
-        # TODO - eventually, this should replace the parent function altogether
-        # TODO - if no relative_multi_pitch, just call normal conversion function
+        if relative_multi_pitch is None:
+            # Perform conversion normally if there are no relative pitch estimates
+            pitch_list = tools.multi_pitch_to_pitch_list(discrete_multi_pitch, self.profile)
+        else:
+            # Combine the discrete/relative pitch to obtain continuous multi pitch estimates
+            pitch_list = utils.continuous_multi_pitch_to_pitch_list(discrete_multi_pitch,
+                                                                    relative_multi_pitch,
+                                                                    self.profile)
 
         return times, pitch_list

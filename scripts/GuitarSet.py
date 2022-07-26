@@ -22,6 +22,7 @@ class GuitarSetPlus(GuitarSet):
     Simple wrapper to additionally include notes and continuous pitch information in ground-truth.
     """
 
+    # TODO - can I remove clutter by making other dataset signatures like this?
     def __init__(self, semitone_width=0.5, augment=False, **kwargs):
         """
         Initialize the dataset variant.
@@ -89,7 +90,7 @@ class GuitarSetPlus(GuitarSet):
             semitone_shift = sample_valid_pitch_shift(stacked_notes, self.profile, 5, self.rng)
 
         # Update the track name to reflect any augmentation
-        track_ = track + f'_{semitone_shift}'
+        track_ = track + f'_{semitone_shift}' if semitone_shift else track
 
         # Load the track data if it exists in memory, otherwise instantiate track data
         data = TranscriptionDataset.load(self, track_)
@@ -161,10 +162,8 @@ class GuitarSetPlus(GuitarSet):
                 utils.stacked_relative_multi_pitch_to_relative_multi_pitch(stacked_relative_multi_pitch,
                                                                            stacked_adjusted_multi_pitch)
 
-            # Collapse the stacked notes representation into a single collection
-            pitches, intervals = tools.stacked_notes_to_notes(stacked_notes)
-            # Batch the notes
-            batched_notes = tools.notes_to_batched_notes(pitches, intervals)
+            # Collapse the stacked notes representation into a single batched collection
+            batched_notes = tools.notes_to_batched_notes(*tools.stacked_notes_to_notes(stacked_notes))
 
             # Add all relevant ground-truth to the dictionary
             data.update({tools.KEY_FS : fs,

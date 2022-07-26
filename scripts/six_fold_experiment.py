@@ -97,15 +97,18 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                            PitchListWrapper(profile=profile)
                                            ])
 
+    # Create a collection of pitch list evaluators spanning various pitch resolutions
+    pl_evaluators = [PitchListEvaluator(pitch_tolerance=(1 / div),
+                                        results_key=f'{tools.KEY_PITCHLIST}_1_{div}') for div in [2, 4, 8, 16]]
+
     # Initialize the evaluation pipeline
     validation_evaluator = ComboEvaluator([LossWrapper(),
                                            MultipitchEvaluator(),
-                                           PitchListEvaluator(),
                                            #TablatureEvaluator(profile=profile),
                                            #SoftmaxAccuracy(key=tools.KEY_TABLATURE),
-                                           NoteEvaluator(key=tools.KEY_NOTE_ON),
-                                           NoteEvaluator(offset_ratio=0.2, key=tools.KEY_NOTE_OFF)
-                                           ])
+                                           NoteEvaluator(results_key=tools.KEY_NOTE_ON),
+                                           NoteEvaluator(offset_ratio=0.2, results_key=tools.KEY_NOTE_OFF)
+                                           ] + pl_evaluators)
 
     # Keep all cached data/features here
     gset_cache = os.path.join('..', 'generated', 'data')
@@ -122,23 +125,16 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
             # Seed everything with the same seed
             tools.seed_everything(seed)
 
-            # Determine the testing split for the fold
-            test_hold_out = '0' + str(k)
-
             print('--------------------')
-            print(f'Fold {test_hold_out}:')
+            print(f'Fold {k}:')
 
-            # Remove the testing split
+            # Allocate training/testing splits
             train_splits = splits.copy()
-            train_splits.remove(test_hold_out)
-            test_splits = [test_hold_out]
+            test_splits = [train_splits.pop(k)]
 
             if validation_split:
-                # Determine the validation split for the fold
-                val_hold_out = '0' + str(5 - k)
-                # Remove the validation split
-                train_splits.remove(val_hold_out)
-                val_splits = [val_hold_out]
+                # Allocate validation split
+                val_splits = [train_splits.pop(k - 1)]
 
             print('Loading training partition...')
 
@@ -161,7 +157,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                       num_workers=0,
                                       drop_last=True)
 
-            print(f'Loading testing partition (player {test_hold_out})...')
+            print(f'Loading testing partition (player {test_splits[0]})...')
 
             # Create a dataset corresponding to the testing partition
             gset_test = GuitarSet(base_dir=None,
@@ -176,7 +172,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                   semitone_width=semitone_width)
 
             if validation_split:
-                print(f'Loading validation partition (player {val_hold_out})...')
+                print(f'Loading validation partition (player {val_splits[0]})...')
 
                 # Create a dataset corresponding to the validation partition
                 gset_val = GuitarSet(base_dir=None,
@@ -197,13 +193,15 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
             tabcnn = TabCNN(dim_in=dim_in,
                             profile=profile,
                             in_channels=data_proc.get_num_channels(),
-                            semitone_width=semitone_width,
                             model_complexity=model_complexity,
+                            semitone_width=semitone_width,
+                            gamma=10,
                             device=gpu_id)
             tabcnn.change_device()
             tabcnn.train()
 
             # Initialize a new optimizer for the model parameters
+            #optimizer = torch.optim.Adam(tabcnn.parameters(), lr=5E-4)
             optimizer = torch.optim.Adadelta(tabcnn.parameters(), learning_rate)
 
             print('Training model...')
