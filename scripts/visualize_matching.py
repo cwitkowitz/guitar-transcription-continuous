@@ -9,6 +9,7 @@ import amt_tools.tools as tools
 import utils
 
 # Regular imports
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 
@@ -74,7 +75,7 @@ for track in tablature_data:
     audio, fs = tools.load_normalize_audio(wav_path, sample_rate)
 
     # We need the frame times for the tablature
-    times = tablature_data.data_proc.get_times(audio)
+    #times = tablature_data.data_proc.get_times(audio)
 
     # Construct the path to the track's JAMS data
     jams_path = tablature_data.get_jams_path(track_name)
@@ -108,11 +109,13 @@ for track in tablature_data:
         # Extract the notes from the slice
         pitches, intervals = stacked_notes[key_n]
 
+        # Extract the pitch list from the slice
+        _times, _pitch_list = stacked_pitch_list[key_pl]
+
+        # TODO - turn following plotting code into a function so it can be reused for downsampled data
+
         # Initialize a figure to hold all the plots
         fig = tools.initialize_figure(interactive=False, figsize=(20, 5))
-
-        # Fix the x-axis boundaries around the duration of the track
-        fixed_xlims = 1.05 * np.array([np.min(times), np.max(times)])
 
         # Loop through all ground-truth notes
         for n in range(len(pitches)):
@@ -121,15 +124,23 @@ for track in tablature_data:
             # Choose the next color for the note
             color = color_loop[n % len(color_loop)]
             # Obtain an independent multi pitch array for each note
-            note_multi_pitch = tools.notes_to_multi_pitch(pitch, interval, times, profile)
+            note_multi_pitch = tools.notes_to_multi_pitch(pitch, interval, _times, profile)
             # Plot the multi pitch array for the note
-            fig = tools.plot_pianoroll(note_multi_pitch, times, profile, overlay=True, color=color, alpha=0.25, fig=fig)
+            fig = tools.plot_pianoroll(note_multi_pitch, _times, profile, overlay=True, color=color, alpha=0.25, fig=fig)
             # Plot the note (rounded to nearest pitch) as a rectangular outline
             fig = tools.plot_notes(np.round(pitch), interval, x_bounds=fig.gca().get_xlim(), color=color, fig=fig)
-            #tools.plot_pitch_list(*stacked_pitch_list[key_pl], False, color='red', fig=fig)
+
+        # Plot all pitch contour data
+        # TODO - would be interesting to look at pitch contour data before placing it on a uniform time grid
+        fig = tools.plot_pitch_list(_times, _pitch_list, point_size=7,
+                                    x_bounds=fig.gca().get_xlim(), color='k', alpha=0.25, fig=fig)
+        # Make grid lines visible on the plot at the frame times
+        fig.gca().vlines(_times, ymin=profile.low - 0.5, ymax=profile.high + 0.5, color='k', alpha=0.05)
 
         # Save the figure
-        fig.savefig(save_path_ds)
+        fig.savefig(save_path_rg)#, dpi=500)
+        # Close the figure
+        plt.close(fig)
 
     # TODO - need the following for regular plot
     #        - notes plotted w/ absolute time (rectangles w/ transparent fill)
