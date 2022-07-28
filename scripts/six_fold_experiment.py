@@ -21,6 +21,8 @@ from sacred import Experiment
 import torch
 import os
 
+torch.multiprocessing.set_start_method('spawn', force=True)
+
 EX_NAME = '_'.join([TabCNN.model_name(),
                     GuitarSet.dataset_name(),
                     CQT.features_name()])
@@ -148,13 +150,13 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                    profile=profile,
                                    save_loc=gset_cache,
                                    semitone_width=semitone_width,
-                                   augment=False)
+                                   augment=True)
 
             # Create a PyTorch data loader for the dataset
             train_loader = DataLoader(dataset=gset_train,
                                       batch_size=batch_size,
                                       shuffle=True,
-                                      num_workers=0,
+                                      num_workers=4,
                                       drop_last=True)
 
             print(f'Loading testing partition (player {test_splits[0]})...')

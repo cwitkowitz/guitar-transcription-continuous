@@ -80,8 +80,8 @@ class GuitarSetPlus(GuitarSet):
             # Construct the path to the track's JAMS data
             jams_path = self.get_jams_path(track)
 
-            # Load the original jams data
-            jams_data = jams.load(jams_path)
+            # Load the original jams data (ignoring validation for speedup)
+            jams_data = jams.load(jams_path, validate=False)
 
             # Load the original notes by string from the JAMS data
             stacked_notes = tools.extract_stacked_notes_jams(jams_data)
