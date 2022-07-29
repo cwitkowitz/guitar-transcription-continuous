@@ -3,6 +3,7 @@ import amt_tools.tools as tools
 
 # Regular imports
 from mir_eval.multipitch import resample_multipitch
+from math import floor, ceil
 
 import numpy as np
 import warnings
@@ -62,24 +63,30 @@ class PitchContour(object):
     observations corresponding to a single pitch contour.
     """
 
-    def __init__(self, onset_idx, onset_pitch):
+    def __init__(self, pitch, onset_idx):
         """
         Initialize a pitch contour object.
 
         Parameters
         ----------
+        pitch : float or ndarray
+          Observed pitch at the onset frame of the contour or array of pitch observations
         onset_idx : int
           Index within a pitch list where the contour begins
-        onset_pitch : float
-          Observed pitch at the onset frame of the contour
         """
 
         # Initialize the contour's interval indices
         self.onset_idx = onset_idx
         self.offset_idx = onset_idx
 
-        # Initialize an array to hold the pitch observations across the contour
-        self.pitch_observations = np.array([onset_pitch])
+        if isinstance(pitch, np.ndarray):
+            # Use the provided array as the pitch observations
+            self.pitch_observations = pitch
+            # Update the offset index to reflect the size of the array
+            self.offset_idx += (len(pitch) - 1)
+        else:
+            # Initialize an array to hold the pitch observations across the contour
+            self.pitch_observations = np.array([pitch])
 
     def append_observation(self, pitch):
         """
@@ -112,6 +119,165 @@ class PitchContour(object):
 
         return last_observation
 
+    def get_interval(self, times=None):
+        """
+        Helper function to obtain the currently tracked interval for the contour.
+
+        Parameters
+        ----------
+        times : ndarray (Optional)
+          Array of times to index
+
+        Returns
+        ----------
+        interval : ndarray (2)
+          Onset and offset corresponding to pitch contour intervals or times
+        """
+
+        # Construct an array to hold the interval indices
+        interval = np.array([self.onset_idx, self.offset_idx])
+
+        if times is not None:
+            # Index the array of times with the interval
+            interval = times[interval]
+
+        return interval
+
+    def get_times(self, _times):
+        """
+        Helper function to obtain the times of the contour observations.
+
+        Parameters
+        ----------
+        _times : ndarray
+          Array of times to index
+
+        Returns
+        ----------
+        times : ndarray (N)
+          Array of times corresponding to pitch observations
+          N - number of observations across the contour
+        """
+
+        # Index the provided times with the interval of the contour
+        times = _times[np.arange(*self.get_interval() + [0, 1])]
+
+        return times
+
+    def get_pitch_list(self, _times=None):
+        """
+        Helper function to represent the contour data as a pitch list.
+
+        Parameters
+        ----------
+        _times : ndarray or None (optional)
+          Array of times to index if tuple form is desired
+
+        Returns
+        ----------
+        times : ndarray (N) (if _times is not None)
+          Array of times corresponding to pitch observations
+          N - number of observations across the contour
+        pitch_list : list of ndarray (N x [ndarray (1)])
+          Frame-level observations detailing active pitches
+          N - number of observations across the contour
+        """
+
+        # Represent the observations as a pitch list
+        pitch_list = [np.array([p]) for p in self.pitch_observations]
+
+        # TODO - tools.clean_pitch_list()? is it even necessary?
+
+        if _times is not None:
+            # Obtain times corresponding to the observations
+            times = self.get_times(_times)
+            # Represent the data as a tuple
+            pitch_list = times, pitch_list
+
+        return pitch_list
+
+    @staticmethod
+    def discard_null_observations(pitch_list):
+        """
+        Discard null pitch observations within frames.
+
+        Parameters
+        ----------
+        pitch_list : list of ndarray (N x [...])
+          Frame-level observations detailing active pitches
+          N - number of frames
+
+        Returns
+        ----------
+        pitch_list : list of ndarray (N x [...])
+          Frame-level observations detailing active pitches
+          N - number of frames
+        """
+
+        # Discard empty observations
+        pitch_list = np.array([p for p in pitch_list if p])
+
+        return pitch_list
+
+    def get_region_average(self, percentage_start=0., percentage_stop=1.):
+        """
+        Compute the average pitch with a duration-dependent region of the contour.
+
+        Parameters
+        ----------
+        percentage_start : float (0, 1)
+          Percent of duration where region begins
+        percentage_stop : float (0, 1)
+          Percent of duration where region ends
+
+        Returns
+        ----------
+        average : float
+          Average pitch across the specified region
+        """
+
+        # Determine the number of pitch observations
+        num_observations = len(self.pitch_observations)
+
+        # Determine which indices correspond to the specified region
+        idx_start = floor(percentage_start * num_observations)
+        idx_stop = ceil(percentage_stop * num_observations)
+
+        # Slice the specified region of the observations
+        region_observations = self.pitch_observations[idx_start : idx_stop]
+
+        # Make sure null observations do not influence the statistics
+        #region_observations = self.discard_null_observations(region_observations)
+
+        # Compute the mean of the remaining observations
+        average = np.mean(region_observations)
+
+        return average
+
+    def get_pitch_percentile(self, percentile=0.):
+        """
+        Obtain the value at the specified percentile of pitch across the contour.
+
+        Parameters
+        ----------
+        percentile : float (0, 1)
+          Pitch percentile to obtain
+
+        Returns
+        ----------
+        value : float
+          Value at specified percentile
+        """
+
+        # Make sure null observations do not influence the statistics
+        #observations = self.discard_null_observations(self.pitch_observations)
+        observations = self.pitch_observations
+
+        # Obtain the specified percentile of the remaining observations
+        value = np.percentile(observations, 100 * percentile) if len(observations) else np.nan
+
+        return value
+
 
 class ContourTracker(object):
     """
@@ -130,10 +296,51 @@ class ContourTracker(object):
         Initialize a contour tracker object.
         """
 
+        # Initialize fields for the tracker
+        self.contours = None
+        self.active_idcs = None
+
+        # Reset tracker state
+        self.reset_tracker()
+
+    def reset_tracker(self):
+        """
+        Reset tracker state.
+        """
+
         # Initialize empty lists to hold all contours
         # as well as the indices of active contours
         self.contours = list()
         self.active_idcs = list()
+
+    def get_num_contours(self):
+        """
+        Helper function to determine the number of contours currently tracked.
+
+        Returns
+        ----------
+        num_contours : int
+          Amount of tracked contours
+        """
+
+        num_contours = len(self.contours)
+
+        return num_contours
+
+    def filter_contours(self, idcs):
+        """
+        Discard all contours except those at the specified indices.
+
+        Parameters
+        ----------
+        idcs : ndarray of bools
+          Array of bools corresponding to contours to keep
+        """
+
+        # Remove contours marked False
+        self.contours = [self.contours[i] for (i, keep) in enumerate(idcs) if keep]
+        # Remove active indices corresponding to contours marked False
+        self.active_idcs = [i for i in np.where(idcs)[0] if i in self.active_idcs]
 
     def track_new_contour(self, onset_idx, onset_pitch):
         """
@@ -148,7 +355,7 @@ class ContourTracker(object):
         """
 
         # Initialize a new contour for the pitch
-        self.contours += [PitchContour(onset_idx, onset_pitch)]
+        self.contours += [PitchContour(onset_pitch, onset_idx)]
         # Mark the index of the contour as active
         self.active_idcs += [len(self.contours) - 1]
 
@@ -269,47 +476,74 @@ class ContourTracker(object):
                 # Start tracking a new contour
                 self.track_new_contour(i, pitch)
 
-    def get_contour_intervals(self):
+    def get_contour_intervals(self, times=None):
         """
         Helper function to get the intervals of all tracked pitch contours.
+
+        Parameters
+        ----------
+        times : ndarray (Optional)
+          Array of times to index
 
         Returns
         ----------
         intervals : ndarray (N x 2)
-          Array of onset-offset index pairs corresponding to pitch contours
+          Array of onset-offset index or time pairs corresponding to pitch contours
         """
 
-        if len(self.contours):
-            # Group the onset and offset indices of all tracked contours
-            intervals = np.array([[c.onset_idx, c.offset_idx] for c in self.contours])
-        else:
-            # Empty array with the correct size
-            intervals = np.zeros((0, 2))
+        # Group the onset and offset indices or times of all tracked contours
+        intervals = np.array([c.get_interval(times) for c in self.contours]).reshape(-1, 2)
 
         return intervals
 
-    def get_contour_means(self):
+    def get_contour_averages(self, percentage_start=0., percentage_stop=1.):
         """
-        Helper function to get the average pitch of all tracked pitch contours.
+        Helper function to compute the average pitch with a
+        duration-dependent region for all tracked pitch contours.
 
-        TODO - could also write functions to get average of a region of the contour, i.e.
-               [25% duration, 50% duration], or similar statistics such as lowest/highest
-               pitch across a fixed duration window
+        Parameters
+        ----------
+        percentage_start : float (0, 1)
+          Percent of duration where region begins
+        percentage_stop : float (0, 1)
+          Percent of duration where region ends
 
         Returns
         ----------
-        means : ndarray
-          Array of average pitches corresponding to pitch contours
+        averages : ndarray
+          Array of average pitch across the specified region of each pitch contour
         """
 
         # Compute the average pitch for all tracked contours
-        means = np.array([np.mean(c.pitch_observations) for c in self.contours])
+        averages = np.array([c.get_region_average(percentage_start,
+                                                  percentage_stop) for c in self.contours])
 
-        return means
+        return averages
+
+    def get_contour_percentiles(self, percentile=0.10):
+        """
+        Helper function to obtain the specified percentile
+        of pitch associated for all tracked pitch contours.
+
+        Parameters
+        ----------
+        percentile : float (0, 1)
+          Pitch percentile to obtain for each contour
+
+        Returns
+        ----------
+        values : ndarray
+          Values at specified percentile of each pitch contour
+        """
+
+        # Obtain the specified pitch percentile of all tracked contours
+        values = np.array([c.get_pitch_percentile(percentile) for c in self.contours])
+
+        return values
 
 
-def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, times=None,
-                                                  semitone_width=0.5, suppress_warnings=True):
+def get_note_contour_grouping_by_interval(notes, pitch_list, profile, times=None,
+                                          semitone_width=0.5, suppress_warnings=True):
     """
     Represent note streams as anchored pitch deviations within a multi pitch array, along
     with an accompanying multi pitch array adjusted in accordance with the pitch list (so
@@ -358,8 +592,8 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
       T - number of frames
     """
 
-    # Unpack the note attributes, removing notes with out-of-bounds nominal pitch
-    pitches, intervals = tools.filter_notes(*notes, profile, suppress_warnings)
+    # Unpack the note attributes
+    pitches, intervals = notes
 
     # Unpack the pitch list attributes
     _times, pitch_list = pitch_list
@@ -372,118 +606,80 @@ def streams_to_continuous_multi_pitch_by_interval(notes, pitch_list, profile, ti
                       'to infer note-pitch groupings.', category=RuntimeWarning)
 
     # Determine the dimensionality for the multi pitch array
-    num_pitches = profile.get_range_len()
     num_frames = len(pitch_list)
 
-    # Initialize two empty multi pitch arrays for relative and adjusted multi pitch data
-    relative_multi_pitch = np.zeros((num_pitches, num_frames))
-    adjusted_multi_pitch = np.zeros((num_pitches, num_frames))
-
-    # Round note pitches to nearest semitone and subtract the lowest
-    # supported note of the instrument to obtain pitch indices
-    pitch_idcs = np.round(pitches - profile.low).astype(tools.INT)
+    # Initialize a dictionary to hold (note, [contours]) pairs
+    grouping = dict()
 
     # Determine how many notes were provided
-    num_notes = len(pitch_idcs)
+    num_notes = len(pitches)
 
     # Make sure there are notes to match and the pitch list is not empty
-    if num_notes and num_frames:
-        # Duplicate the array of times for each note and stack along a new axis
-        _times_broadcast = np.concatenate([[_times]] * max(1, num_notes), axis=0)
+    #if num_notes and num_frames:
+    # Duplicate the array of times for each note and stack along a new axis
+    _times_broadcast = np.concatenate([[_times]] * max(1, num_notes), axis=0)
 
-        # Determine the frame where each note begins and ends
-        onset_idcs = np.argmin((_times_broadcast <= intervals[..., :1]), axis=1) - 1
-        offset_idcs = np.argmin((_times_broadcast <= intervals[..., 1:]), axis=1) - 1
+    # Determine the frame where each note begins and ends
+    onset_idcs = np.argmin((_times_broadcast <= intervals[..., :1]), axis=1) - 1
+    offset_idcs = np.argmin((_times_broadcast <= intervals[..., 1:]), axis=1) - 1
 
-        # Clip all offsets at last frame - they will end up at -1 from
-        # previous operation if they occurred beyond last frame time
-        offset_idcs[offset_idcs == -1] = num_frames - 1
+    # Clip all offsets at last frame - they will end up at -1 from
+    # previous operation if they occurred beyond last frame time
+    offset_idcs[offset_idcs == -1] = num_frames - 1
 
-        # Loop through each note
-        for i in range(num_notes):
-            # Keep track of adjusted note boundaries without modifying original values
-            adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
+    # Loop through each note
+    for i in range(num_notes):
+        # Keep track of adjusted note boundaries without modifying original values
+        adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
 
-            # Adjust the onset index to the first frame with non-empty pitch observations
-            while not len(pitch_list[adjusted_onset]) and adjusted_onset <= adjusted_offset:
-                adjusted_onset += 1
+        # Adjust the onset index to the first frame with non-empty pitch observations
+        while not len(pitch_list[adjusted_onset]) and adjusted_onset <= adjusted_offset:
+            adjusted_onset += 1
 
-            # Adjust the offset index to the last frame with non-empty pitch observations
-            while not len(pitch_list[adjusted_offset]) and adjusted_offset >= adjusted_onset:
-                adjusted_offset -= 1
+        # Adjust the offset index to the last frame with non-empty pitch observations
+        while not len(pitch_list[adjusted_offset]) and adjusted_offset >= adjusted_onset:
+            adjusted_offset -= 1
 
-            # Check that there are non-empty pitch observations
-            if adjusted_onset <= adjusted_offset and len(pitch_list[adjusted_onset]):
-                # Extract the (cropped) pitch observations within the note interval
-                pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
-            else:
-                if not suppress_warnings:
-                    # TODO - occurs quite frequently for notes with small
-                    #        duration if the pitch list is undersampled.
-                    # There are no non-empty pitch observations, throw a warning
-                    warnings.warn('No pitch observations occur within the note interval. ' +
-                                  'Inserting average pitch of note instead.', category=RuntimeWarning)
-                # Reset the interval to the original note boundaries
-                adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
-                # Populate the frames with the average pitch of the note
-                pitch_observations = [np.array([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
-
-            # Populate the multi pitch array with adjusted activations for the note
-            adjusted_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = 1
-
-            # Check if there are any empty observations remaining
-            if tools.contains_empties_pitch_list(pitch_observations) and not suppress_warnings:
-                # There are some gaps in the observations, throw a warning
-                warnings.warn('Missing pitch observations within note interval. ' +
-                              'Will attempt to interpolate gaps.', category=RuntimeWarning)
-
-            # Convert the cropped pitch list to an array of monophonic pitches, choosing
-            # the pitch closest to the nominal value of the note if a frame is polyphonic
-            # TODO - if this function is called from the clustering variant, we already have
-            #        these and this may even be less precise in some polyphonic corner cases
-            pitch_observations = np.array([p[np.argmin(np.abs(p - pitches[i]))]
-                                           if len(p) else 0. for p in pitch_observations])
-
-            # Interpolate between gaps in pitch observations
-            pitch_observations = tools.interpolate_gaps(pitch_observations)
-
-            # Determine the nominal pitch of the note
-            nominal_pitch = round(pitches[i])
-
-            # Clip pitch observations such they are within supported semitone boundaries
-            pitch_observations = np.clip(pitch_observations,
-                                         a_min=nominal_pitch - semitone_width,
-                                         a_max=nominal_pitch + semitone_width)
-
-            # Compute the deviation between the pitch observations and the nominal value
-            deviations = pitch_observations - nominal_pitch
-
-            # Populate the multi pitch array with relative deviations for the note
-            relative_multi_pitch[pitch_idcs[i], adjusted_onset: adjusted_offset + 1] = deviations
-
-    if times is not None:
-        # TODO - it might make more sense to do this outside of the function for more modularity
-        # If times given, obtain indices to resample the multi pitch arrays
-        resample_idcs = tools.get_resample_idcs(_times, times)
-
-        if resample_idcs is None:
-            # Initialize empty arrays with the expected number of frames
-            relative_multi_pitch = np.zeros((num_pitches, len(times)))
-            adjusted_multi_pitch = np.zeros((num_pitches, len(times)))
+        # Check that there are non-empty pitch observations
+        if adjusted_onset <= adjusted_offset and len(pitch_list[adjusted_onset]):
+            # Extract the (cropped) pitch observations within the note interval
+            pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
         else:
-            # Reduce the multi pitch arrays to the resample indices
-            # TODO - elegant solution, but could result in notes with duration
-            #        shorter than a frame being erased if undersampled
-            relative_multi_pitch = relative_multi_pitch[..., resample_idcs]
-            adjusted_multi_pitch = adjusted_multi_pitch[..., resample_idcs]
+            if not suppress_warnings:
+                # TODO - occurs quite frequently for notes with small
+                #        duration if the pitch list is undersampled.
+                # There are no non-empty pitch observations, throw a warning
+                warnings.warn('No pitch observations occur within the note interval. ' +
+                              'Inserting average pitch of note instead.', category=RuntimeWarning)
+            # Reset the interval to the original note boundaries
+            adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
+            # Populate the frames with the average pitch of the note
+            pitch_observations = [np.array([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
 
-    return relative_multi_pitch, adjusted_multi_pitch
+        # Check if there are any empty observations remaining
+        if tools.contains_empties_pitch_list(pitch_observations) and not suppress_warnings:
+            # There are some gaps in the observations, throw a warning
+            warnings.warn('Missing pitch observations within note interval. ' +
+                          'Will attempt to interpolate gaps.', category=RuntimeWarning)
+
+        # Convert the cropped pitch list to an array of monophonic pitches, choosing
+        # the pitch closest to the nominal value of the note if a frame is polyphonic
+        pitch_observations = np.array([p[np.argmin(np.abs(p - pitches[i]))]
+                                       if len(p) else 0. for p in pitch_observations])
+
+        # Interpolate between gaps in pitch observations
+        pitch_observations = tools.interpolate_gaps(pitch_observations)
+
+        # Create a new entry for the note and the extracted pitch list
+        grouping[i] = [PitchContour(pitch_observations, adjusted_onset)]
+
+    return grouping
 
 
-def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, times=None, semitone_width=0.5,
-                                                 stream_tolerance=1.0, minimum_contour_duration=None,
-                                                 attempt_corrections=False, combine_associated_contours=True,
-                                                 suppress_warnings=True):
+def get_note_contour_grouping_by_cluster(notes, pitch_list, profile, times=None, semitone_width=0.5,
+                                         stream_tolerance=1.0, minimum_contour_duration=None,
+                                         attempt_corrections=False, combine_associated_contours=True,
+                                         suppress_warnings=True):
     """
     Associate pitch contours in a pitch list with a collection of notes, then obtain
     discretized and relative multi pitch information after adjusting the provided
@@ -501,7 +697,7 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
         Array of onset-offset time pairs corresponding to (non-overlapping) notes
       (K - number of notes)
     pitch_list : tuple (_times, _pitch_list)
-      _pitch_list : list of ndarray (N x [...])
+      pitch_list : list of ndarray (N x [...])
         Collection of MIDI pitches corresponding to (non-overlapping) notes
       _times : ndarray (N)
         Time in seconds of beginning of each frame
@@ -540,42 +736,29 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
     pitches, intervals = notes
 
     # Unpack the pitch list attributes
-    _times, _pitch_list = pitch_list
+    _times, pitch_list = pitch_list
     # Make sure there are no null observations in the pitch list
-    _pitch_list = tools.clean_pitch_list(_pitch_list)
+    pitch_list = tools.clean_pitch_list(pitch_list)
 
     # Initialize a new pitch contour tracker
     tracker = ContourTracker()
     # Track the contours within the provided pitch list
-    tracker.parse_pitch_list(_pitch_list, tolerance=stream_tolerance)
-    # Obtain intervals and averages for pitch observation clusters (contours)
-    contour_intervals, contour_means = tracker.get_contour_intervals(), tracker.get_contour_means()
-
-    if len(contour_means):
-        # Extract the corresponding times of the inferred contours
-        contour_times = _times[contour_intervals.flatten()].reshape(contour_intervals.shape)
-    else:
-        # Empty array with the correct size
-        contour_times = np.zeros((0, 2))
+    tracker.parse_pitch_list(pitch_list, tolerance=stream_tolerance)
 
     # Compute the duration of each inferred contour
-    contour_durations = np.diff(contour_times).squeeze(-1)
+    contour_durations = np.diff(tracker.get_contour_intervals(_times)).squeeze(-1)
 
     if minimum_contour_duration is not None:
         # Determine which contours have duration above the minimum required
         valid_contours = contour_durations > minimum_contour_duration * 1E-3
         # Remove contours with intervals smaller than specified threshold
-        contour_means = contour_means[valid_contours]
-        contour_times = contour_times[valid_contours]
-
-    # Determine the total number of clusters (contours)
-    num_contours = len(contour_means)
+        tracker.filter_contours(valid_contours)
 
     # Initialize an array for the assignment of each contour to a note
-    assignment = np.array([-1] * num_contours, dtype=tools.INT)
+    assignment = np.array([-1] * tracker.get_num_contours(), dtype=tools.INT)
 
-    # Loop through each pitch contour
-    for i, (start, end) in enumerate(contour_times):
+    # Loop through each pitch contour's time interval
+    for i, (start, end) in enumerate(tracker.get_contour_intervals(_times)):
         # Identify points of interest for each contour/note pair
         left_bound, left_inter = np.minimum(start, intervals[:, 0]), np.maximum(start, intervals[:, 0])
         right_inter, right_bound = np.minimum(end, intervals[:, 1]), np.maximum(end, intervals[:, 1])
@@ -600,16 +783,13 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
                               'overlap with any notes.', category=RuntimeWarning)
 
     # Ignore pitch contours without an assignment
-    contour_means = contour_means[assignment != -1]
-    contour_times = contour_times[assignment != -1]
+    tracker.filter_contours(assignment != -1)
     assignment = assignment[assignment != -1]
 
-    # Count the total number of notes provided
-    num_notes = len(pitches)
     # Determine which contours where assigned a note index
     assigned_notes = np.unique(assignment)
 
-    if len(np.setdiff1d(np.arange(num_notes), assigned_notes)) and not suppress_warnings:
+    if len(np.setdiff1d(np.arange(len(pitches)), assigned_notes)) and not suppress_warnings:
         # Some notes are not assigned to any pitch contours
         # TODO - occurs quite frequently when notes of same pitch are
         #        played consecutively with no silent frames in between.
@@ -628,10 +808,12 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
         warnings.warn('Multiple pitch contours assigned ' +
                       'to the same note.', category=RuntimeWarning)
 
+    # Compute nominal pitch values for the contours
+    contour_region_averages = tracker.get_contour_averages(0.25, 0.5)
+
     # Compute the difference in magnitude between the average pitch of
     # the contour and the average pitch of the note for each grouping
-    # TODO - doesn't necessarily have to be the mean of the contour
-    magnitude_differences = np.abs(pitches[assignment] - contour_means)
+    magnitude_differences = np.abs(pitches[assignment] - contour_region_averages)
 
     for i in np.where(magnitude_differences > semitone_width)[0]:
         if not suppress_warnings:
@@ -641,38 +823,112 @@ def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, tim
         if attempt_corrections:
             # Create new note entry for the poorly matching contour (no need
             # to update note intervals, since contour times are used instead)
-            pitches = np.append(pitches, contour_means[i])
+            pitches = np.append(pitches, contour_region_averages[i])
             # Change the assignment of the contour
             assignment[i] = len(pitches) - 1
             # Update the list of assigned notes
             assigned_notes = np.unique(assignment)
 
-    if combine_associated_contours:
-        # Initialize empty arrays for combined contours
-        _pitches, _intervals = np.empty(0), np.empty((0, 2))
-        # Loop through all notes with assigned contours
-        for note_idx in assigned_notes:
-            # Add the pitch of the note assigned to the contours
-            _pitches = np.append(_pitches, pitches[note_idx])
-            # Obtain the intervals of the contours assigned to the note
-            _contour_times = contour_times[assignment == note_idx]
-            # Determine the earliest onset and latest offset among all contours
-            min_t, max_t = np.min(_contour_times[:, 0]), np.max(_contour_times[:, 1])
-            # Combine contours with the same note assignment
-            _intervals = np.append(_intervals, np.array([[min_t, max_t]]), axis=0)
-    else:
-        # Replace note intervals with contour intervals, ignoring contours without an assignment
-        _pitches, _intervals = pitches[assignment[assignment != -1]], contour_times[assignment != -1]
+    # Initialize a dictionary to hold (note, [contours]) pairs
+    grouping = dict()
 
-    # Represent contours as note groups
-    contours = _pitches, _intervals
+    # Loop through all notes (including additions from corrections)
+    for n in range(len(pitches)):
+        # Pair the note's index with a list of the contours assigned to the note
+        grouping[n] = [c for (i, c) in enumerate(tracker.contours) if assignment[i] == n]
 
-    # Parse the inferred contour intervals to obtain the multi pitch arrays
-    relative_multi_pitch, \
-        adjusted_multi_pitch = streams_to_continuous_multi_pitch_by_interval(notes=contours, pitch_list=pitch_list,
-                                                                             profile=profile, times=times,
-                                                                             semitone_width=semitone_width,
-                                                                             suppress_warnings=suppress_warnings)
+    return grouping
+
+
+def streams_to_continuous_multi_pitch_by_cluster(notes, pitch_list, profile, times=None, semitone_width=0.5,
+                                                 stream_tolerance=1.0, minimum_contour_duration=None,
+                                                 attempt_corrections=False, combine_associated_contours=True,
+                                                 suppress_warnings=True):
+    """
+    TODO
+    """
+
+    # Unpack the note attributes, removing notes with out-of-bounds nominal pitch
+    pitches, intervals = tools.filter_notes(*notes, profile, suppress_warnings)
+
+    # Unpack the pitch list attributes
+    _times, pitch_list = pitch_list
+
+    # Determine the dimensionality for the multi pitch array
+    num_pitches = profile.get_range_len()
+    num_frames = len(pitch_list)
+
+    # Determine how many notes were provided
+    num_notes = len(pitches)
+
+    # Initialize two empty multi pitch arrays for relative and adjusted multi pitch data
+    relative_multi_pitch = np.zeros((num_pitches, num_frames))
+    adjusted_multi_pitch = np.zeros((num_pitches, num_frames))
+
+    # Round note pitches to nearest semitone and subtract the lowest
+    # supported note of the instrument to obtain pitch indices
+    pitch_idcs = np.round(pitches - profile.low).astype(tools.INT)
+
+    grouping = get_note_contour_grouping_by_interval((pitches, intervals), (_times, pitch_list), profile)
+
+    # Loop through each note
+    for i in range(num_notes):
+        """
+        if combine_associated_contours:
+            # Initialize empty arrays for combined contours
+            _pitches, _intervals = np.empty(0), np.empty((0, 2))
+            # Loop through all notes with assigned contours
+            for note_idx in assigned_notes:
+                # Add the pitch of the note assigned to the contours
+                _pitches = np.append(_pitches, pitches[note_idx])
+                # Obtain the intervals of the contours assigned to the note
+                _contour_times = contour_times[assignment == note_idx]
+                # Determine the earliest onset and latest offset among all contours
+                min_t, max_t = np.min(_contour_times[:, 0]), np.max(_contour_times[:, 1])
+                # Combine contours with the same note assignment
+                _intervals = np.append(_intervals, np.array([[min_t, max_t]]), axis=0)
+        else:
+            # Replace note intervals with contour intervals, ignoring contours without an assignment
+            _pitches, _intervals = pitches[assignment[assignment != -1]], contour_times[assignment != -1]
+    
+        # Represent contours as note groups
+        contours = _pitches, _intervals
+        """
+
+        for c in grouping[i]:
+            # Obtain the contour interval
+            onset, offset = c.get_interval()
+            # Populate the multi pitch array with activations for the note
+            adjusted_multi_pitch[pitch_idcs[i], onset : offset + 1] = 1
+
+            # Determine the nominal pitch of the note
+            nominal_pitch = round(pitches[i])
+
+            # Clip pitch observations such they are within supported semitone boundaries
+            pitch_observations = np.clip(c.pitch_observations,
+                                         a_min=nominal_pitch - semitone_width,
+                                         a_max=nominal_pitch + semitone_width)
+
+            # Compute the deviation between the pitch observations and the nominal value
+            deviations = pitch_observations - nominal_pitch
+
+            # Populate the multi pitch array with relative deviations for the note
+            relative_multi_pitch[pitch_idcs[i], onset: offset + 1] = deviations
+
+    if times is not None:
+        # If times given, obtain indices to resample the multi pitch arrays
+        resample_idcs = tools.get_resample_idcs(_times, times)
+
+        if resample_idcs is None:
+            # Initialize empty arrays with the expected number of frames
+            relative_multi_pitch = np.zeros((num_pitches, len(times)))
+            adjusted_multi_pitch = np.zeros((num_pitches, len(times)))
+        else:
+            # Reduce the multi pitch arrays to the resample indices
+            # TODO - elegant solution, but could result in notes with duration
+            #        shorter than a frame being erased if undersampled
+            relative_multi_pitch = relative_multi_pitch[..., resample_idcs]
+            adjusted_multi_pitch = adjusted_multi_pitch[..., resample_idcs]
 
     return relative_multi_pitch, adjusted_multi_pitch
 
