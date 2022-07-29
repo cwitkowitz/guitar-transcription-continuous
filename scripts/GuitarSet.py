@@ -151,7 +151,6 @@ class GuitarSetPlus(GuitarSet):
                                                                         stream_tolerance=0.55, # semitones
                                                                         minimum_contour_duration=6, # milliseconds
                                                                         attempt_corrections=True,
-                                                                        combine_associated_contours=False,
                                                                         suppress_warnings=True)
 
             # Obtain a collapsed representation of the multi pitch ground-truth adjusted to the pitch contours
