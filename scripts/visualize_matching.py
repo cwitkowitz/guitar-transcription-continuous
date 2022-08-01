@@ -13,152 +13,228 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
-# Processing parameters
-sample_rate = 22050
-hop_length = 512
 
-# Initialize the default guitar profile
-profile = tools.GuitarProfile(num_frets=19)
+def plot_association(pitch, interval, times, contours, color='k', fig=None):
+    """
+    Plot a collection of pitch contours associated with a single note.
 
-# Create the cqt data processing module
-data_proc = CQT(sample_rate=sample_rate,
-                hop_length=hop_length,
-                n_bins=192,
-                bins_per_octave=24)
+    Parameters
+    ----------
+    pitch : ndarray (1)
+      Pitch corresponding to a single note
+    interval : ndarray (1 x 2)
+      Onset-offset time pair corresponding to the note
+    times : ndarray (N)
+      Time in seconds of beginning of each frame
+      N - number of time samples (frames)
+    contours : list of PitchContour
+      Contour objects associated with the provided note
+    color : string
+      Color for the association
+    fig : matplotlib Figure object
+      Preexisting figure to use for plotting
 
-# All cached data/features kept here
-gset_cache = os.path.join('..', 'generated', 'data')
+    Returns
+    ----------
+    fig : matplotlib Figure object
+      A handle for the figure used to plot the association
+    """
 
-# Initialize the dataset to visualize
-tablature_data = GuitarSet(base_dir=None,
-                           hop_length=hop_length,
-                           sample_rate=sample_rate,
-                           data_proc=data_proc,
-                           profile=profile,
-                           save_data=False,
-                           store_data=False,
-                           save_loc=gset_cache)
+    if fig is None:
+        # Initialize a new figure if one was not given
+        fig = tools.initialize_figure(interactive=False)
 
-# Construct a path to the base directory for saving visualizations
-save_dir = os.path.join('..', 'generated', 'visualization', 'matching')
-os.makedirs(save_dir, exist_ok=True)
+    # Obtain an independent multi pitch array for each note
+    note_multi_pitch = tools.notes_to_multi_pitch(pitch, interval, times, profile)
 
-# Use this line to only visualize data for specific tracks
-# tablature_data.tracks = ['<track_name>']
+    # Plot the multi pitch array for the note
+    fig = tools.plot_pianoroll(note_multi_pitch, times, profile, overlay=True, color=color, alpha=0.25, fig=fig)
 
-kwargs = {'semitone_width' : 1.5, # semitones
-          'stream_tolerance' : 0.55, # semitones
-          'minimum_contour_duration' : 6, # milliseconds
-          'attempt_corrections' : True,
-          'combine_associated_contours' : False,
-          'suppress_warnings' : False}
+    # Plot the note (rounded to nearest pitch) as a rectangular outline
+    fig = tools.plot_notes(np.round(pitch), interval, x_bounds=fig.gca().get_xlim(), color=color, fig=fig)
 
-# Define a list of colors to loop through when plotting event-level data
-color_loop = ['red', 'green', 'blue']
+    # Loop through all contours associated with the note as a result of the grouping algorithm
+    for contour in contours:
+        # Plot the pitch contour data associated with the note
+        fig = tools.plot_pitch_list(*contour.get_pitch_list(times), point_size=25,
+                                    x_bounds=fig.gca().get_xlim(), overlay=True,
+                                    color=color, alpha=0.5, fig=fig)
 
-# Loop through each track in the tablature data
-for track in tablature_data:
-    # Obtain the name of the track
-    track_name = track[tools.KEY_TRACK]
+    return fig
 
-    # Create a save directory for all data from this track
-    track_dir = os.path.join(save_dir, track_name)
 
-    # Make sure the save directory exists
-    os.makedirs(track_dir, exist_ok=True)
+def plot_note_contour_associations(notes, pitch_list, grouping, primary_color_loop=None,
+                                   secondary_color_loop=None, fig=None):
+    """
+    Plot estimated groupings between notes and pitch contours.
 
-    print(f'Processing track {track_name}...')
+    Parameters
+    ----------
+    notes : tuple (pitches, intervals)
+      pitches : ndarray (K)
+        Array of pitches corresponding to notes in MIDI format
+      intervals : ndarray (K x 2)
+        Array of onset-offset time pairs corresponding to notes
+      (K - number of notes)
+    pitch_list : tuple (times, pitch_list)
+      pitch_list : list of ndarray (N x [...])
+        Collection of MIDI pitches corresponding to notes
+      times : ndarray (N)
+        Time in seconds of beginning of each frame
+      (N - number of pitch observations (frames))
+    grouping : (note, [contours]) pairs : dict
+      Dictionary containing (note_idx -> [PitchContour]) pairs
+    primary_color_loop : list of str
+      Colors to use in sequence when plotting notes
+    secondary_color_loop : list of str
+      Colors to use in sequence when plotting corrections
+    fig : matplotlib Figure object
+      Preexisting figure to use for plotting
 
-    # Construct the path to the track's audio
-    wav_path = tablature_data.get_wav_path(track_name)
-    # Load and normalize the audio along with the sampling rate
-    audio, fs = tools.load_normalize_audio(wav_path, sample_rate)
+    Returns
+    ----------
+    fig : matplotlib Figure object
+      A handle for the figure used to plot the association
+    """
 
-    # We need the frame times for the tablature
-    #times = tablature_data.data_proc.get_times(audio)
+    if fig is None:
+        # Initialize a new figure if one was not given
+        fig = tools.initialize_figure(interactive=False)
 
-    # Construct the path to the track's JAMS data
-    jams_path = tablature_data.get_jams_path(track_name)
+    if primary_color_loop is None:
+        # Default colors to loop through for ground-truth notes
+        primary_color_loop = ['red', 'green', 'blue']
 
-    # Load the notes by string from the JAMS file
-    stacked_notes = tools.load_stacked_notes_jams(jams_path)
+    if secondary_color_loop is None:
+        # Default colors to loop through for note corrections
+        secondary_color_loop = ['magenta', 'yellow', 'cyan']
 
-    # Load the string-wise pitch annotations from the JAMS file
-    stacked_pitch_list = tools.load_stacked_pitch_list_jams(jams_path)
-    stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
+    # Unpack the note data
+    pitches, intervals = notes
 
-    # Obtain the in-order keys for each stack
-    stacked_notes_keys = list(stacked_notes.keys())
-    stacked_pitch_list_keys = list(stacked_pitch_list.keys())
+    # Unpack the pitch list data
+    times, pitch_list = pitch_list
 
-    # Loop through the slices of the collections
-    for i in range(len(stacked_notes_keys)):
-        # Extract the key for the current slice in each collection
-        key_n, key_pl = stacked_notes_keys[i], stacked_pitch_list_keys[i]
+    # Loop through all ground-truth notes
+    for n in range(len(pitches)):
+        # Obtain a notes representation of the single note
+        pitch, interval = pitches[n: n + 1], intervals[n: n + 1]
+        # Choose the next color for the note
+        color = primary_color_loop[n % len(primary_color_loop)]
+        # Plot the note with any associated pitch contours
+        fig = plot_association(pitch, interval, times, grouping[n], color, fig)
 
-        # Create paths to save the plots for this string
-        save_path_rg = os.path.join(track_dir, f'regular-{key_pl}.jpg')
-        save_path_ds = os.path.join(track_dir, f'downsampled-{key_pl}.jpg')
+    # Loop through any note corrections
+    for k in np.setdiff1d(list(grouping.keys()), np.arange(len(pitches))):
+        # Compute the mean of the contour in the beginning-mid region as the pitch
+        pitch = np.mean([c.get_region_average(0.25, 0.5) for c in grouping[k]], keepdims=True)
+        # Obtain the intervals for all contours associated with the correction
+        _intervals = np.array([c.get_interval(times) for c in grouping[k]])
+        # Construct one overarching interval for the correction
+        interval = np.array([[np.min(_intervals[:, 0]), np.max(_intervals[:, 1])]])
+        # Choose the next color for the correction
+        color = secondary_color_loop[k % len(secondary_color_loop)]
+        # Plot the correction with any associated pitch contours
+        fig = plot_association(pitch, interval, times, grouping[k], color, fig)
 
-        # Obtain the note stream multi pitch arrays for the notes in this slice
-        #relative_multi_pitch, \
-        #    adjusted_multi_pitch = utils.streams_to_continuous_multi_pitch_by_cluster(stacked_notes[key_n],
-        #                                                                              stacked_pitch_list[key_pl],
-        #                                                                              profile, **kwargs)
+    # Plot the pitch contour data for the whole track
+    # TODO - would be interesting to look at pitch contour data before placing it on a uniform time grid
+    fig = tools.plot_pitch_list(times=times, pitch_list=pitch_list,
+                                point_size=10, x_bounds=fig.gca().get_xlim(),
+                                overlay=True, color='k', alpha=0.5, fig=fig)
+    # Make grid lines visible on the plot at the frame times
+    fig.gca().vlines(times, ymin=profile.low - 0.5, ymax=profile.high + 0.5, color='k', alpha=0.05)
 
-        # Extract the notes from the slice
-        pitches, intervals = stacked_notes[key_n]
+    return fig
 
-        # Extract the pitch list from the slice
-        _times, _pitch_list = stacked_pitch_list[key_pl]
 
-        # TODO - turn following plotting code into a function so it can be reused for downsampled data
+if __name__ == '__main__':
+    # Processing parameters
+    sample_rate = 22050
+    hop_length = 512
 
-        # Initialize a figure to hold all the plots
-        fig = tools.initialize_figure(interactive=False, figsize=(20, 5))
+    # Initialize the default guitar profile
+    profile = tools.GuitarProfile(num_frets=19)
 
-        # Loop through all ground-truth notes
-        for n in range(len(pitches)):
-            # Obtain a notes representation of the single note
-            pitch, interval = pitches[n: n + 1], intervals[n: n + 1]
-            # Choose the next color for the note
-            color = color_loop[n % len(color_loop)]
-            # Obtain an independent multi pitch array for each note
-            note_multi_pitch = tools.notes_to_multi_pitch(pitch, interval, _times, profile)
-            # Plot the multi pitch array for the note
-            fig = tools.plot_pianoroll(note_multi_pitch, _times, profile, overlay=True, color=color, alpha=0.25, fig=fig)
-            # Plot the note (rounded to nearest pitch) as a rectangular outline
-            fig = tools.plot_notes(np.round(pitch), interval, x_bounds=fig.gca().get_xlim(), color=color, fig=fig)
+    # Create the cqt data processing module
+    data_proc = CQT(sample_rate=sample_rate,
+                    hop_length=hop_length,
+                    n_bins=192,
+                    bins_per_octave=24)
 
-        # Plot all pitch contour data
-        # TODO - would be interesting to look at pitch contour data before placing it on a uniform time grid
-        fig = tools.plot_pitch_list(_times, _pitch_list, point_size=7,
-                                    x_bounds=fig.gca().get_xlim(), color='k', alpha=0.25, fig=fig)
-        # Make grid lines visible on the plot at the frame times
-        fig.gca().vlines(_times, ymin=profile.low - 0.5, ymax=profile.high + 0.5, color='k', alpha=0.05)
+    # All cached data/features kept here
+    gset_cache = os.path.join('..', 'generated', 'data')
 
-        # Save the figure
-        fig.savefig(save_path_rg)#, dpi=500)
-        # Close the figure
-        plt.close(fig)
+    # Initialize the dataset to visualize
+    tablature_data = GuitarSet(base_dir=None,
+                               hop_length=hop_length,
+                               sample_rate=sample_rate,
+                               data_proc=data_proc,
+                               profile=profile,
+                               save_data=False,
+                               store_data=False,
+                               save_loc=gset_cache)
 
-    # TODO - need the following for regular plot
-    #        - notes plotted w/ absolute time (rectangles w/ transparent fill)
-    #        - adjusted multipitch at frame-level (whilst retaining note associations)
-    #        - pitch contours associated with notes
+    # Construct a path to the base directory for saving visualizations
+    save_dir = os.path.join('..', 'generated', 'visualization', 'matching')
+    os.makedirs(save_dir, exist_ok=True)
 
-    # Determine the total length of the track in seconds
-    #total_duration = tools.load_duration_jams(jams_path)
+    # Use this line to only visualize data for specific tracks
+    # tablature_data.tracks = ['<track_name>']
 
-    # TODO - in order to set this up without re-writing code, I'd have
-    #        to make the functions in utils.py much more modular. But
-    #        it might be good to do that anyway, so that it would be
-    #        possible to keep track of note/contour relationships to,
-    #        e.g., retain onset information
+    kwargs = {'semitone_width' : 1.0, # semitones
+              'stream_tolerance' : 0.4, # semitones
+              'minimum_contour_duration' : 6, # milliseconds
+              'attempt_corrections' : True,
+              'suppress_warnings' : False}
 
-    # TODO - visualize matching
+    # Loop through each track in the tablature data
+    for track in tablature_data:
+        # Obtain the name of the track
+        track_name = track[tools.KEY_TRACK]
 
-    # Obtain the times according to the feature extraction parameters
-    #downsampled_times = data_proc.get_times(track[tools.KEY_AUDIO])
+        # Create a save directory for all data from this track
+        track_dir = os.path.join(save_dir, track_name)
 
-    # TODO - visualize downsampled version
+        # Make sure the save directory exists
+        os.makedirs(track_dir, exist_ok=True)
+
+        print(f'Processing track {track_name}...')
+
+        # Construct the path to the track's JAMS data
+        jams_path = tablature_data.get_jams_path(track_name)
+
+        # Load the notes by string from the JAMS file
+        stacked_notes = tools.load_stacked_notes_jams(jams_path)
+
+        # Load the string-wise pitch annotations from the JAMS file
+        stacked_pitch_list = tools.load_stacked_pitch_list_jams(jams_path)
+        stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
+
+        # Obtain the in-order keys for each stack
+        stacked_notes_keys = list(stacked_notes.keys())
+        stacked_pitch_list_keys = list(stacked_pitch_list.keys())
+
+        # Loop through the slices of the collections
+        for i in range(len(stacked_notes_keys)):
+            # Extract the key for the current slice in each collection
+            key_n, key_pl = stacked_notes_keys[i], stacked_pitch_list_keys[i]
+
+            # Create path to save the plot for this string
+            save_path = os.path.join(track_dir, f'string-{key_pl}.jpg')
+
+            # Obtain the note stream multi pitch arrays for the notes in this slice
+            grouping = utils.get_note_contour_grouping_by_cluster(stacked_notes[key_n],
+                                                                  stacked_pitch_list[key_pl],
+                                                                  **kwargs)
+
+            # Initialize a new figure for the associations
+            fig = tools.initialize_figure(interactive=False, figsize=(20, 5))
+            # Plot all the associations drawn from the data
+            fig = plot_note_contour_associations(notes=stacked_notes[key_n],
+                                                 pitch_list=stacked_pitch_list[key_pl],
+                                                 grouping=grouping, fig=fig)
+            # Save the figure
+            fig.savefig(save_path, dpi=500)
+            # Close the figure
+            plt.close(fig)

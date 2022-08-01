@@ -2,7 +2,6 @@
 import amt_tools.tools as tools
 
 # Regular imports
-from mir_eval.multipitch import resample_multipitch
 from math import floor, ceil
 
 import numpy as np
@@ -597,11 +596,11 @@ def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=T
     # Initialize a dictionary to hold (note, [contours]) pairs
     grouping = dict()
 
-    # Determine how many notes were provided
-    num_notes = len(pitches)
-
     # Make sure the pitch list is not empty
     if num_frames:
+        # Determine how many notes were provided
+        num_notes = len(pitches)
+
         # Duplicate the array of times for each note and stack along a new axis
         _times_broadcast = np.concatenate([[_times]] * max(1, num_notes), axis=0)
 
@@ -609,9 +608,9 @@ def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=T
         onset_idcs = np.argmin((_times_broadcast <= intervals[..., :1]), axis=1) - 1
         offset_idcs = np.argmin((_times_broadcast <= intervals[..., 1:]), axis=1) - 1
 
-        # Clip all offsets at last frame - they will end up at -1 from
-        # previous operation if they occurred beyond last frame time
-        offset_idcs[offset_idcs == -1] = num_frames - 1
+        # Clip all onsets/offsets at first/last frame - these will end up
+        # at -1 from previous operation if they occurred beyond boundaries
+        onset_idcs[onset_idcs == -1], offset_idcs[offset_idcs == -1] = 0, num_frames - 1
 
         # Loop through each note
         for i in range(num_notes):
@@ -627,7 +626,7 @@ def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=T
                 adjusted_offset -= 1
 
             # Check that there are non-empty pitch observations
-            if adjusted_onset <= adjusted_offset and len(pitch_list[adjusted_onset]):
+            if adjusted_onset <= adjusted_offset:
                 # Extract the (cropped) pitch observations within the note interval
                 pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
             else:
@@ -782,6 +781,8 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
     # Compute nominal pitch values for the contours
     contour_region_averages = tracker.get_contour_averages(0.25, 0.5)
 
+    # TODO - select 10th percentile vs. mean as identified note pitch
+
     # Compute the difference in magnitude between the average pitch of
     # the contour and the average pitch of the note for each grouping
     magnitude_differences = np.abs(pitches[assignment] - contour_region_averages)
@@ -792,8 +793,7 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
             warnings.warn('Average pitch of grouped contour and note differ ' +
                           'beyond specified semitone width.', category=RuntimeWarning)
         if attempt_corrections:
-            # Create new note entry for the poorly matching contour (no need
-            # to update note intervals, since contour times are used instead)
+            # Create new note entry for the poorly matching contour
             pitches = np.append(pitches, contour_region_averages[i])
             # Change the assignment of the contour
             assignment[i] = len(pitches) - 1
@@ -811,8 +811,7 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
     return grouping
 
 
-def \
-        streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None,
+def streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None,
                                       semitone_width=0.5, suppress_warnings=True,
                                       **kwargs):
     """
@@ -861,9 +860,6 @@ def \
     num_pitches = profile.get_range_len()
     num_frames = len(_pitch_list)
 
-    # Determine how many notes were provided
-    num_notes = len(pitches)
-
     # Initialize two empty multi pitch arrays for relative and adjusted multi pitch data
     relative_multi_pitch = np.zeros((num_pitches, num_frames))
     adjusted_multi_pitch = np.zeros((num_pitches, num_frames))
@@ -878,7 +874,7 @@ def \
                                                     **kwargs)
 
     # Loop through each note
-    for i in range(num_notes):
+    for i in range(len(pitches)):
         # Loop through all contours associated with the note
         for contour in grouping[i]:
             # Obtain the contour interval
@@ -886,16 +882,10 @@ def \
             # Populate the multi pitch array with activations for the note
             adjusted_multi_pitch[pitch_idcs[i], onset : offset + 1] = 1
 
-            # Determine the nominal pitch of the note
-            nominal_pitch = round(pitches[i])
-
-            # Clip pitch observations such they are within supported semitone boundaries
-            pitch_observations = np.clip(contour.pitch_observations,
-                                         a_min=nominal_pitch - semitone_width,
-                                         a_max=nominal_pitch + semitone_width)
-
             # Compute the deviation between the pitch observations and the nominal value
-            deviations = pitch_observations - nominal_pitch
+            deviations = contour.pitch_observations - round(pitches[i])
+            # Clip the deviations at the supported semitone width
+            deviations = np.clip(deviations, a_min=-semitone_width, a_max=semitone_width)
 
             # Populate the multi pitch array with relative deviations for the note
             relative_multi_pitch[pitch_idcs[i], onset: offset + 1] = deviations
