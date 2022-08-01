@@ -11,6 +11,7 @@ import utils
 # Regular imports
 import matplotlib.pyplot as plt
 import numpy as np
+import jams
 import os
 
 
@@ -138,7 +139,6 @@ def plot_note_contour_associations(notes, pitch_list, grouping, primary_color_lo
         fig = plot_association(pitch, interval, times, grouping[k], color, fig)
 
     # Plot the pitch contour data for the whole track
-    # TODO - would be interesting to look at pitch contour data before placing it on a uniform time grid
     fig = tools.plot_pitch_list(times=times, pitch_list=pitch_list,
                                 point_size=10, x_bounds=fig.gca().get_xlim(),
                                 overlay=True, color='k', alpha=0.5, fig=fig)
@@ -204,12 +204,19 @@ if __name__ == '__main__':
         # Construct the path to the track's JAMS data
         jams_path = tablature_data.get_jams_path(track_name)
 
+        # Load the track's JAMS data
+        jams_data = jams.load(jams_path)
+
         # Load the notes by string from the JAMS file
-        stacked_notes = tools.load_stacked_notes_jams(jams_path)
+        stacked_notes = tools.extract_stacked_notes_jams(jams_data)
 
         # Load the string-wise pitch annotations from the JAMS file
-        stacked_pitch_list = tools.load_stacked_pitch_list_jams(jams_path)
+        stacked_pitch_list = tools.extract_stacked_pitch_list_jams(jams_data)
         stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
+
+        # Load the non-uniform string-wise pitch annotations from the JAMS file
+        _stacked_pitch_list = tools.extract_stacked_pitch_list_jams(jams_data, uniform=False)
+        _stacked_pitch_list = tools.stacked_pitch_list_to_midi(_stacked_pitch_list)
 
         # Obtain the in-order keys for each stack
         stacked_notes_keys = list(stacked_notes.keys())
@@ -234,7 +241,18 @@ if __name__ == '__main__':
             fig = plot_note_contour_associations(notes=stacked_notes[key_n],
                                                  pitch_list=stacked_pitch_list[key_pl],
                                                  grouping=grouping, fig=fig)
+
+            # Unpack the non-uniform pitch list data
+            _times, _pitch_list = _stacked_pitch_list[key_pl]
+
+            # Plot the non-uniform pitch contour data for the whole track
+            fig = tools.plot_pitch_list(times=_times, pitch_list=_pitch_list,
+                                        point_size=10, x_bounds=fig.gca().get_xlim(),
+                                        overlay=True, color='k', marker='x', alpha=0.25, fig=fig)
+
             # Save the figure
             fig.savefig(save_path, dpi=500)
             # Close the figure
             plt.close(fig)
+
+    # TODO - could collapse all strings and run/visualize grouping algorithm just for fun (should still work fine)
