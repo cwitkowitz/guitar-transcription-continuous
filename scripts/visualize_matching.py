@@ -228,9 +228,9 @@ if __name__ == '__main__':
             key_n, key_pl = stacked_notes_keys[i], stacked_pitch_list_keys[i]
 
             # Create path to save the plot for this string
-            save_path = os.path.join(track_dir, f'string-{key_pl}.jpg')
+            save_path_string = os.path.join(track_dir, f'string-{key_pl}.jpg')
 
-            # Obtain the note stream multi pitch arrays for the notes in this slice
+            # Obtain the contour grouping for the notes in this slice
             grouping = utils.get_note_contour_grouping_by_cluster(stacked_notes[key_n],
                                                                   stacked_pitch_list[key_pl],
                                                                   **kwargs)
@@ -245,14 +245,49 @@ if __name__ == '__main__':
             # Unpack the non-uniform pitch list data
             _times, _pitch_list = _stacked_pitch_list[key_pl]
 
-            # Plot the non-uniform pitch contour data for the whole track
+            # Plot the non-uniform pitch contour data for the slice
             fig = tools.plot_pitch_list(times=_times, pitch_list=_pitch_list,
                                         point_size=10, x_bounds=fig.gca().get_xlim(),
                                         overlay=True, color='k', marker='x', alpha=0.25, fig=fig)
 
             # Save the figure
-            fig.savefig(save_path, dpi=500)
+            fig.savefig(save_path_string, dpi=500)
             # Close the figure
             plt.close(fig)
 
-    # TODO - could collapse all strings and run/visualize grouping algorithm just for fun (should still work fine)
+        """
+        # Create path to save the plot for all strings
+        save_path = os.path.join(track_dir, f'all.jpg')
+
+        # Collapse the notes from all slices into a single representation
+        all_notes = tools.stacked_notes_to_notes(stacked_notes)
+        # Collapse contour data from all slices into a single representation
+        all_contours = tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)
+
+        # Obtain the contour grouping for all notes at once
+        grouping = utils.get_note_contour_grouping_by_cluster(all_notes,
+                                                              all_contours,
+                                                              **kwargs)
+
+        # Initialize a new figure for the associations
+        fig = tools.initialize_figure(interactive=False, figsize=(20, 5))
+        # Plot all the associations drawn from the data
+        fig = plot_note_contour_associations(notes=all_notes,
+                                             pitch_list=all_contours,
+                                             grouping=grouping,
+                                             primary_color_loop=['r', 'orange', 'y', 'g', 'b', 'indigo', 'violet'],
+                                             secondary_color_loop=['k'],
+                                             fig=fig)
+
+        # Collapse non-uniform contours from all slices into a single representation
+        _all_contours = tools.stacked_pitch_list_to_pitch_list(_stacked_pitch_list)
+
+        # Plot the non-uniform pitch contour data for the whole track
+        fig = tools.plot_pitch_list(*_all_contours, point_size=10, x_bounds=fig.gca().get_xlim(),
+                                    overlay=True, color='k', marker='x', alpha=0.25, fig=fig)
+
+        # Save the figure
+        fig.savefig(save_path, dpi=500)
+        # Close the figure
+        plt.close(fig)
+        """

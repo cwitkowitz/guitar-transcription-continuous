@@ -552,8 +552,6 @@ def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=T
     played in unison or overlapping pitch contours with significant deviation from the
     nominal pitches of their note sources.
 
-    TODO - validate with polyphonic data
-
     Parameters
     ----------
     notes : tuple (pitches, intervals)
@@ -667,9 +665,7 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
     """
     Associate pitch contours in a pitch list with a collection of notes, based off
     of clusters of pitch observations and their intersection-over-union (IoU) with
-    the notes.
-
-    TODO - validate with polyphonic data
+    the notes and proximity w.r.t pitch.
 
     Parameters
     ----------
@@ -728,7 +724,8 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
     assignment = np.array([-1] * tracker.get_num_contours(), dtype=tools.INT)
 
     # Loop through each pitch contour's time interval
-    for i, (start, end) in enumerate(tracker.get_contour_intervals(_times)):
+    for i, ((start, end), avg) in enumerate(zip(tracker.get_contour_intervals(_times),
+                                                tracker.get_contour_averages(0.25, 0.5))):
         # Identify points of interest for each contour/note pair
         left_bound, left_inter = np.minimum(start, intervals[:, 0]), np.maximum(start, intervals[:, 0])
         right_inter, right_bound = np.minimum(end, intervals[:, 1]), np.maximum(end, intervals[:, 1])
@@ -740,10 +737,16 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
         # Divide by the union to produce the IOU of each contour/note pair
         iou[left_inter < right_inter] /= (right_bound - left_bound)[left_inter < right_inter]
 
-        # Determine the note with the highest IOU and the value of the IOU
-        max_iou, note_idx = np.max(iou), np.argmax(iou)
+        # Compute pitch proximity scores using exponential distribution
+        pitch_proximities = np.exp(-1.5 * np.abs(pitches - avg))
 
-        if max_iou > 0:
+        # Point-wise multiply the IOU and pitch proximities to obtain matching scores
+        matching_scores = iou * pitch_proximities
+
+        # Determine the note with the highest score and the value of the score
+        max_score, note_idx = np.max(matching_scores), np.argmax(matching_scores)
+
+        if max_score > 0:
             # Assign the chosen note to the contour
             assignment[i] = note_idx
         else:
