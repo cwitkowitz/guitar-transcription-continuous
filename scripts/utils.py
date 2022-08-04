@@ -737,8 +737,8 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
         # Divide by the union to produce the IOU of each contour/note pair
         iou[left_inter < right_inter] /= (right_bound - left_bound)[left_inter < right_inter]
 
-        # Compute pitch proximity scores using exponential distribution
-        pitch_proximities = np.exp(-1.5 * np.abs(pitches - avg))
+        # Compute pitch proximity scores using exponential distribution with lambda=1
+        pitch_proximities = np.exp(-np.abs(pitches - avg))
 
         # Point-wise multiply the IOU and pitch proximities to obtain matching scores
         matching_scores = iou * pitch_proximities
@@ -814,9 +814,7 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
     return grouping
 
 
-def streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None,
-                                      semitone_width=0.5, suppress_warnings=True,
-                                      **kwargs):
+def streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None, suppress_warnings=True, **kwargs):
     """
     Obtain discretized and relative multi pitch information for pitch
     contours in a pitch list associated with a collection of notes.
@@ -840,8 +838,6 @@ def streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None,
     times : ndarray (L) (Optional)
       Array of alternate times for optional resampling of pitch list
       L - number of time samples (frames)
-    semitone_width : float
-      Amount of deviation from nominal pitch supported
     suppress_warnings : bool
       Whether to ignore warning messages
     **kwargs : N/A
@@ -887,9 +883,6 @@ def streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None,
 
             # Compute the deviation between the pitch observations and the nominal value
             deviations = contour.pitch_observations - round(pitches[i])
-
-            # Clip the deviations at the supported semitone width
-            deviations = np.clip(deviations, a_min=-semitone_width, a_max=semitone_width)
 
             # Populate the multi pitch array with relative deviations for the note
             relative_multi_pitch[pitch_idcs[i], onset: offset + 1] = deviations
@@ -968,6 +961,70 @@ def stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes, stacked_pit
     stacked_adjusted_multi_pitch = np.concatenate(stacked_adjusted_multi_pitch)
 
     return stacked_relative_multi_pitch, stacked_adjusted_multi_pitch
+
+
+def get_rotarized_relative_multi_pitch(relative_multi_pitch, adjusted_multi_pitch=None):
+    """
+    Compute pitch deviations at all anchoring points, assuming
+    monophony, for each frame of a relative multi pitch array.
+
+    Parameters
+    ----------
+    relative_multi_pitch : ndarray (... x F x T)
+      Array of anchored pitch deviations
+      F - number of discrete pitches
+      T - number of frames
+    adjusted_multi_pitch : ndarray (... x F x T) (optional)
+      Discrete pitch activation map aligned with pitch contours
+      F - number of discrete pitches
+      T - number of frames
+
+    Returns
+    ----------
+    relative_multi_pitch : ndarray (... x F x T)
+      Array of rotarized pitch deviations
+      F - number of discrete pitches
+      T - number of frames
+    """
+
+    if adjusted_multi_pitch is None:
+        # Default the multi pitch activations to non-zero pitch deviations
+        adjusted_multi_pitch = relative_multi_pitch != 0
+
+    # Determine the number of pitches supported
+    num_pitches = relative_multi_pitch.shape[-2]
+
+    # Determine where there are active pitches
+    active_idcs = np.sum(adjusted_multi_pitch, axis=-2) > 0
+
+    # Obtain the multi pitch activity at the active frames
+    active_frames = np.swapaxes(adjusted_multi_pitch, -1, -2)[active_idcs]
+
+    # Determine where the pitch activity is anchored (assuming monophony)
+    anchors = np.argmax(active_frames, axis=-1)
+
+    # Temporarily switch the pitch/frame axes
+    relative_multi_pitch = np.swapaxes(relative_multi_pitch, -1, -2)
+
+    # Extract the frame-level deviations
+    frame_deviations = relative_multi_pitch[active_idcs]
+
+    # Obtain the deviations at the anchoring points
+    deviations = frame_deviations[np.arange(len(anchors)), anchors]
+
+    # Obtain pitch offsets for all frames w.r.t. the anchoring points
+    pitch_offsets = np.subtract.outer(anchors, np.arange(num_pitches))
+
+    # Compute the rotarized deviations for all frames with pitch activity
+    rotarized_deviations = np.expand_dims(deviations, axis=-1) + pitch_offsets
+
+    # Insert the rotarized deviations
+    relative_multi_pitch[np.where(active_idcs)] = rotarized_deviations
+
+    # Switch the pitch/frame axes back
+    relative_multi_pitch = np.swapaxes(relative_multi_pitch, -1, -2)
+
+    return relative_multi_pitch
 
 
 def stacked_relative_multi_pitch_to_relative_multi_pitch(stacked_relative_multi_pitch,

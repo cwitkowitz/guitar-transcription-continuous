@@ -153,6 +153,15 @@ class GuitarSetPlus(GuitarSet):
                                                                         attempt_corrections=True,
                                                                         suppress_warnings=True)
 
+            # Obtain a rotary representation of the relative pitch deviations
+            stacked_relative_multi_pitch = utils.get_rotarized_relative_multi_pitch(stacked_relative_multi_pitch,
+                                                                                    stacked_adjusted_multi_pitch)
+
+            # Clip the deviations at the supported semitone width
+            stacked_relative_multi_pitch = np.clip(stacked_relative_multi_pitch,
+                                                   a_min=-self.semitone_width,
+                                                   a_max=self.semitone_width)
+
             # Obtain a logistic representation of the multi pitch ground-truth adjusted to the pitch contours
             adjusted_multi_pitch = \
                 tools.stacked_multi_pitch_to_logistic(stacked_adjusted_multi_pitch, self.profile, True)
