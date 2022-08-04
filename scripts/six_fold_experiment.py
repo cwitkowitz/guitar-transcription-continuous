@@ -1,14 +1,14 @@
 # Author: Frank Cwitkowitz <fcwitkow@ur.rochester.edu>
 
 # My imports
-from tabcnn_variants import TabCNNContinuousMultipitch as TabCNN
+from tabcnn_variants import TabCNNLogisticContinuous as TabCNN
 from GuitarSet import GuitarSetPlus as GuitarSet
 #from amt_tools.models import TabCNN
 from amt_tools.features import CQT
 
 from amt_tools.train import train
-from amt_tools.transcribe import ComboEstimator, NoteTranscriber
-from inference import PitchListWrapper
+from amt_tools.transcribe import ComboEstimator, NoteTranscriber, TablatureWrapper
+from inference import StackedPitchListTablatureWrapper
 from amt_tools.evaluate import *
 
 import amt_tools.tools as tools
@@ -27,7 +27,7 @@ EX_NAME = '_'.join([TabCNN.model_name(),
                     GuitarSet.dataset_name(),
                     CQT.features_name()])
 
-ex = Experiment('TabCNN (Continuous Multipitch) w/ CQT on GuitarSet w/ 6-fold Cross Validation')
+ex = Experiment('TabCNN (Continuous) w/ CQT on GuitarSet w/ 6-fold Cross Validation')
 
 
 @ex.config
@@ -85,7 +85,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
     # Processing parameters
     dim_in = 192
     model_complexity = 1
-    semitone_width = 1.5
+    semitone_width = 1.0
 
     # Create the cqt data processing module
     data_proc = CQT(sample_rate=sample_rate,
@@ -94,10 +94,9 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                     bins_per_octave=24)
 
     # Initialize the estimation pipeline
-    validation_estimator = ComboEstimator([#TablatureWrapper(profile=profile),
-                                           NoteTranscriber(profile=profile),
-                                           PitchListWrapper(profile=profile)
-                                           ])
+    validation_estimator = ComboEstimator([StackedPitchListTablatureWrapper(profile=profile),
+                                           TablatureWrapper(profile=profile),
+                                           NoteTranscriber(profile=profile)])
 
     # Create a collection of pitch list evaluators spanning various pitch resolutions
     pl_evaluators = [PitchListEvaluator(pitch_tolerance=(1 / div),
@@ -106,8 +105,8 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
     # Initialize the evaluation pipeline
     validation_evaluator = ComboEvaluator([LossWrapper(),
                                            MultipitchEvaluator(),
-                                           #TablatureEvaluator(profile=profile),
-                                           #SoftmaxAccuracy(key=tools.KEY_TABLATURE),
+                                           TablatureEvaluator(profile=profile),
+                                           SoftmaxAccuracy(results_key=tools.KEY_TABLATURE),
                                            NoteEvaluator(results_key=tools.KEY_NOTE_ON),
                                            NoteEvaluator(offset_ratio=0.2, results_key=tools.KEY_NOTE_OFF)
                                            ] + pl_evaluators)
@@ -150,7 +149,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                    profile=profile,
                                    save_loc=gset_cache,
                                    semitone_width=semitone_width,
-                                   augment=True)
+                                   augment=False)
 
             # Create a PyTorch data loader for the dataset
             train_loader = DataLoader(dataset=gset_train,
@@ -196,6 +195,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                             profile=profile,
                             in_channels=data_proc.get_num_channels(),
                             model_complexity=model_complexity,
+                            lmbda=10,
                             semitone_width=semitone_width,
                             gamma=10,
                             device=gpu_id)

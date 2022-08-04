@@ -218,44 +218,6 @@ if __name__ == '__main__':
         _stacked_pitch_list = tools.extract_stacked_pitch_list_jams(jams_data, uniform=False)
         _stacked_pitch_list = tools.stacked_pitch_list_to_midi(_stacked_pitch_list)
 
-        # Obtain the in-order keys for each stack
-        stacked_notes_keys = list(stacked_notes.keys())
-        stacked_pitch_list_keys = list(stacked_pitch_list.keys())
-
-        # Loop through the slices of the collections
-        for i in range(len(stacked_notes_keys)):
-            # Extract the key for the current slice in each collection
-            key_n, key_pl = stacked_notes_keys[i], stacked_pitch_list_keys[i]
-
-            # Create path to save the plot for this string
-            save_path_string = os.path.join(track_dir, f'string-{key_pl}.jpg')
-
-            # Obtain the contour grouping for the notes in this slice
-            grouping = utils.get_note_contour_grouping_by_cluster(stacked_notes[key_n],
-                                                                  stacked_pitch_list[key_pl],
-                                                                  **kwargs)
-
-            # Initialize a new figure for the associations
-            fig = tools.initialize_figure(interactive=False, figsize=(20, 5))
-            # Plot all the associations drawn from the data
-            fig = plot_note_contour_associations(notes=stacked_notes[key_n],
-                                                 pitch_list=stacked_pitch_list[key_pl],
-                                                 grouping=grouping, fig=fig)
-
-            # Unpack the non-uniform pitch list data
-            _times, _pitch_list = _stacked_pitch_list[key_pl]
-
-            # Plot the non-uniform pitch contour data for the slice
-            fig = tools.plot_pitch_list(times=_times, pitch_list=_pitch_list,
-                                        point_size=10, x_bounds=fig.gca().get_xlim(),
-                                        overlay=True, color='k', marker='x', alpha=0.25, fig=fig)
-
-            # Save the figure
-            fig.savefig(save_path_string, dpi=500)
-            # Close the figure
-            plt.close(fig)
-
-        """
         # Create path to save the plot for all strings
         save_path = os.path.join(track_dir, f'all.jpg')
 
@@ -290,4 +252,3 @@ if __name__ == '__main__':
         fig.savefig(save_path, dpi=500)
         # Close the figure
         plt.close(fig)
-        """

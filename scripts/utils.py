@@ -887,6 +887,7 @@ def streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None,
 
             # Compute the deviation between the pitch observations and the nominal value
             deviations = contour.pitch_observations - round(pitches[i])
+
             # Clip the deviations at the supported semitone width
             deviations = np.clip(deviations, a_min=-semitone_width, a_max=semitone_width)
 
@@ -1055,12 +1056,50 @@ def continuous_multi_pitch_to_pitch_list(discrete_multi_pitch, relative_multi_pi
 
 
 def stacked_continuous_multi_pitch_to_stacked_pitch_list(stacked_discrete_multi_pitch,
-                                                         stacked_relative_multi_pitch, profile):
+                                                         stacked_relative_multi_pitch, times, profile):
     """
-    TODO
+    Convert a stack of discrete and relative multi pitch arrays into a stack of pitch lists.
+
+    Parameters
+    ----------
+    stacked_discrete_multi_pitch : ndarray (S x F x T)
+      Discrete pitch activation map
+      S - number of slices in stack
+      F - number of discrete pitches
+      T - number of frames
+    stacked_relative_multi_pitch : ndarray (S x F x T)
+      Relative pitch deviations anchored to discrete pitches
+      S - number of slices in stack
+      F - number of discrete pitches
+      T - number of frames
+    times : ndarray (T)
+      Time in seconds of beginning of each frame
+      T - number of time samples (frames)
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
+
+    Returns
+    ----------
+    stacked_pitch_list : dict
+      Dictionary containing (slice -> (times, pitch_list)) pairs
     """
 
-    stacked_pitch_list = None
+    # Determine the number of slices in the stacked multi pitch array
+    stack_size = stacked_discrete_multi_pitch.shape[-3]
+
+    # Initialize a dictionary to hold the pitch lists
+    stacked_pitch_list = dict()
+
+    # Loop through the slices of the stack
+    for slc in range(stack_size):
+        # Extract the multi pitch arrays pertaining to this slice
+        slice_discrete, slice_relative = stacked_discrete_multi_pitch[slc], stacked_relative_multi_pitch[slc]
+
+        # Convert the multi pitch array to a pitch list
+        slice_pitch_list_ = continuous_multi_pitch_to_pitch_list(slice_discrete, slice_relative, profile)
+
+        # Add the pitch list to the stacked pitch list dictionary under the slice key
+        stacked_pitch_list.update(tools.pitch_list_to_stacked_pitch_list(times, slice_pitch_list_, slc))
 
     return stacked_pitch_list
 
