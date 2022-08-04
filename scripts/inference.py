@@ -2,7 +2,6 @@
 
 # My imports
 from amt_tools.transcribe import StackedPitchListWrapper as _StackedPitchListWrapper
-from amt_tools.transcribe import PitchListWrapper as _PitchListWrapper
 
 import amt_tools.tools as tools
 
@@ -16,13 +15,33 @@ import os
 class StackedPitchListWrapper(_StackedPitchListWrapper):
     """
     Wrapper for converting stacked continuous multi pitch activation maps to a stacked pitch list.
+
+    TODO - eventually, this should replace the parent class altogether
     """
+
+    def __init__(self, profile, multi_pitch_key=None, multi_pitch_rel_key=None, estimates_key=None, save_dir=None):
+        """
+        Initialize parameters for the estimator.
+
+        Parameters
+        ----------
+        See Estimator class...
+
+        multi_pitch_rel_key : string or None (optional)
+          Key to use when unpacking relative multi pitch data
+        """
+
+        super().__init__(profile=profile,
+                         multi_pitch_key=multi_pitch_key,
+                         estimates_key=estimates_key,
+                         save_dir=save_dir)
+
+        # Default the key for unpacking relevant data
+        self.multi_pitch_rel_key = constants.KEY_MULTIPITCH_REL if multi_pitch_rel_key is None else multi_pitch_rel_key
 
     def estimate(self, raw_output):
         """
         Convert stacked continuous multi pitch activation maps to a stacked pitch list.
-
-        TODO - eventually, this should replace the parent function altogether
 
         Parameters
         ----------
@@ -36,10 +55,10 @@ class StackedPitchListWrapper(_StackedPitchListWrapper):
         """
 
         # Obtain the discrete multi pitch activation map
-        stacked_discrete_multi_pitch = tools.unpack_dict(raw_output, tools.KEY_MULTIPITCH)
+        stacked_discrete_multi_pitch = tools.unpack_dict(raw_output, self.multi_pitch_key)
 
         # Obtain the relative multi pitch activation map
-        stacked_relative_multi_pitch = tools.unpack_dict(raw_output, constants.KEY_MULTIPITCH_REL)
+        stacked_relative_multi_pitch = tools.unpack_dict(raw_output, self.multi_pitch_rel_key)
 
         # Obtain the frame times associated with the activation map
         times = tools.unpack_dict(raw_output, tools.KEY_TIMES)
@@ -61,16 +80,16 @@ class StackedPitchListWrapper(_StackedPitchListWrapper):
         return stacked_pitch_list
 
 
-class PitchListWrapper(_PitchListWrapper):
+class PitchListWrapper(StackedPitchListWrapper):
     """
     Wrapper for converting continuous multi pitch activation maps to a pitch list.
+
+    TODO - eventually, this should replace the parent class altogether
     """
 
     def estimate(self, raw_output):
         """
         Convert continuous multi pitch activation maps to a pitch list.
-
-        TODO - eventually, this should replace the parent function altogether
 
         Parameters
         ----------
@@ -88,10 +107,10 @@ class PitchListWrapper(_PitchListWrapper):
         """
 
         # Obtain the discrete multi pitch activation map
-        discrete_multi_pitch = tools.unpack_dict(raw_output, tools.KEY_MULTIPITCH)
+        discrete_multi_pitch = tools.unpack_dict(raw_output, self.multi_pitch_key)
 
         # Obtain the relative multi pitch activation map
-        relative_multi_pitch = tools.unpack_dict(raw_output, constants.KEY_MULTIPITCH_REL)
+        relative_multi_pitch = tools.unpack_dict(raw_output, self.multi_pitch_rel_key)
 
         # Obtain the frame times associated with the activation map
         times = tools.unpack_dict(raw_output, tools.KEY_TIMES)
@@ -107,10 +126,35 @@ class PitchListWrapper(_PitchListWrapper):
 
         return times, pitch_list
 
+    def write(self, pitch_list, track):
+        """
+        Write pitch estimates to a file.
+
+        Parameters
+        ----------
+        pitch_list : tuple containing
+          times : ndarray (N)
+            Time in seconds of beginning of each frame
+            N - number of time samples (frames)
+          pitch_list : list of ndarray (N x [...])
+            Array of pitches corresponding to notes
+            N - number of pitch observations (frames)
+        track : string
+          Name of the track being processed
+        """
+
+        # Stack the pitch list
+        stacked_pitch_list = tools.pitch_list_to_stacked_pitch_list(*pitch_list)
+
+        # Call the parent function
+        super().write(stacked_pitch_list, track)
+
 
 class StackedPitchListTablatureWrapper(StackedPitchListWrapper):
     """
     Wrapper for converting continuous tablature activation maps to a stacked pitch list.
+
+    TODO - could this should replace TablatureWrapper eventually?
     """
 
     def pre_proc(self, raw_output):
@@ -132,11 +176,11 @@ class StackedPitchListTablatureWrapper(StackedPitchListWrapper):
         raw_output = super().pre_proc(raw_output)
 
         # Obtain a stacked multi pitch array representation of the tablature
-        raw_output[tools.KEY_MULTIPITCH] = \
-            tools.tablature_to_stacked_multi_pitch(raw_output[tools.KEY_TABLATURE], self.profile)
+        raw_output[self.multi_pitch_key] = \
+            tools.tablature_to_stacked_multi_pitch(raw_output[self.multi_pitch_key], self.profile)
 
         # Obtain a stacked multi pitch array representation of the relative pitch
-        raw_output[constants.KEY_MULTIPITCH_REL] = \
-            tools.logistic_to_stacked_multi_pitch(raw_output[constants.KEY_TABLATURE_REL], self.profile, False)
+        raw_output[self.multi_pitch_rel_key] = \
+            tools.logistic_to_stacked_multi_pitch(raw_output[self.multi_pitch_rel_key], self.profile, False)
 
         return raw_output
