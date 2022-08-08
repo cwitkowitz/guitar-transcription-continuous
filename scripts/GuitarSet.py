@@ -128,18 +128,12 @@ class GuitarSetPlus(GuitarSet):
             # Represent the string-wise notes as a stacked multi pitch array
             stacked_multi_pitch = tools.stacked_notes_to_stacked_multi_pitch(stacked_notes, times, self.profile)
 
-            # Collapse the stacked multi pitch array into a single representation
-            multi_pitch = tools.stacked_multi_pitch_to_multi_pitch(stacked_multi_pitch)
-
             # Convert the stacked multi pitch array into tablature
             tablature = tools.stacked_multi_pitch_to_tablature(stacked_multi_pitch, self.profile)
 
             # Load the string-wise pitch annotations from the JAMS data
             stacked_pitch_list = tools.extract_stacked_pitch_list_jams(jams_data)
             stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
-
-            # Collapse the stacked pitch list into a single representation
-            pitch_list = tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)
 
             # Obtain the relative pitch deviation of the contours anchored by string/fret
             stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
@@ -170,18 +164,15 @@ class GuitarSetPlus(GuitarSet):
             relative_multi_pitch = \
                 tools.stacked_multi_pitch_to_logistic(stacked_relative_multi_pitch, self.profile, False)
 
-            # Collapse the stacked notes representation into a single batched collection
-            batched_notes = tools.notes_to_batched_notes(*tools.stacked_notes_to_notes(stacked_notes))
-
             # Add all relevant ground-truth to the dictionary
             data.update({tools.KEY_FS : fs,
                          tools.KEY_AUDIO : audio,
-                         tools.KEY_MULTIPITCH : multi_pitch,
+                         tools.KEY_MULTIPITCH : stacked_multi_pitch,
                          tools.KEY_TABLATURE : tablature,
-                         tools.KEY_PITCHLIST : pitch_list, # TODO - stacked_pitch_list
+                         tools.KEY_PITCHLIST : stacked_pitch_list,
                          constants.KEY_TABLATURE_ADJ : adjusted_multi_pitch,
                          constants.KEY_TABLATURE_REL : relative_multi_pitch,
-                         tools.KEY_NOTES : batched_notes}) # TODO - stacked_notes
+                         tools.KEY_NOTES : stacked_notes})
 
             if self.save_data:
                 # Get the appropriate path for saving the track data
@@ -189,8 +180,12 @@ class GuitarSetPlus(GuitarSet):
 
                 # Create a copy of the data
                 data_to_save = deepcopy(data)
-                # Package the pitch list into save-friendly format
-                data_to_save.update({tools.KEY_PITCHLIST : tools.pack_pitch_list(*pitch_list)})
+                # TODO - could also consider representing string-wise
+                #        notes/contours as (pitch, interval/time, source) tuples
+                # Package the stacked pitch list into save-friendly format
+                data_to_save.update({tools.KEY_PITCHLIST : tools.pack_stacked_representation(stacked_pitch_list)})
+                # Package the stacked notes into save-friendly format
+                data_to_save.update({tools.KEY_NOTES : tools.pack_stacked_representation(stacked_notes)})
 
                 # Save the data as a NumPy zip file
                 tools.save_dict_npz(gt_path, data_to_save)
