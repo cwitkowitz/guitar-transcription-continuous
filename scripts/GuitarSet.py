@@ -180,8 +180,6 @@ class GuitarSetPlus(GuitarSet):
 
                 # Create a copy of the data
                 data_to_save = deepcopy(data)
-                # TODO - could also consider representing string-wise
-                #        notes/contours as (pitch, interval/time, source) tuples
                 # Package the stacked pitch list into save-friendly format
                 data_to_save.update({tools.KEY_PITCHLIST : tools.pack_stacked_representation(stacked_pitch_list)})
                 # Package the stacked notes into save-friendly format

@@ -7,11 +7,14 @@ from GuitarSet import GuitarSetPlus as GuitarSet
 from amt_tools.features import CQT
 
 from amt_tools.train import train
-from amt_tools.transcribe import ComboEstimator, NoteTranscriber, TablatureWrapper
+from amt_tools.transcribe import ComboEstimator, StackedNoteTranscriber, TablatureWrapper
 from inference import StackedPitchListTablatureWrapper
 from amt_tools.evaluate import *
+from evaluators import *
 
 import amt_tools.tools as tools
+
+import constants
 
 # Regular imports
 from sacred.observers import FileStorageObserver
@@ -94,21 +97,36 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                     bins_per_octave=24)
 
     # Initialize the estimation pipeline
-    validation_estimator = ComboEstimator([StackedPitchListTablatureWrapper(profile=profile),
-                                           TablatureWrapper(profile=profile),
-                                           NoteTranscriber(profile=profile)])
+    validation_estimator = ComboEstimator([
+        # Discrete tablature -> stacked multi pitch array
+        TablatureWrapper(profile=profile),
+        # Stacked multi pitch array -> stacked notes
+        StackedNoteTranscriber(profile=profile),
+        # Continuous tablature arrays -> stacked pitch list
+        StackedPitchListTablatureWrapper(profile=profile,
+                                         multi_pitch_key=tools.KEY_TABLATURE,
+                                         multi_pitch_rel_key=constants.KEY_TABLATURE_REL)])
+
+    # Fractions of semitone to use for tolerances when evaluating pitch lists
+    divs = [2, 4, 8, 16]
 
     # Create a collection of pitch list evaluators spanning various pitch resolutions
     pl_evaluators = [PitchListEvaluator(pitch_tolerance=(1 / div),
-                                        results_key=f'{tools.KEY_PITCHLIST}_1_{div}') for div in [2, 4, 8, 16]]
+                                        results_key=f'{tools.KEY_PITCHLIST}_1_{div}') for div in divs]
+    pl_evaluators += [TablaturePitchListEvaluator(pitch_tolerance=(1 / div),
+                                                  results_key=f'{tools.KEY_PITCHLIST}-string_1_{div}') for div in divs]
 
     # Initialize the evaluation pipeline
     validation_evaluator = ComboEvaluator([LossWrapper(),
                                            MultipitchEvaluator(),
                                            TablatureEvaluator(profile=profile),
-                                           SoftmaxAccuracy(results_key=tools.KEY_TABLATURE),
+                                           SoftmaxAccuracy(),
                                            NoteEvaluator(results_key=tools.KEY_NOTE_ON),
-                                           NoteEvaluator(offset_ratio=0.2, results_key=tools.KEY_NOTE_OFF)
+                                           NoteEvaluator(offset_ratio=0.2,
+                                                         results_key=tools.KEY_NOTE_OFF),
+                                           TablatureNoteEvaluator(results_key=f'{tools.KEY_NOTE_ON}-string'),
+                                           TablatureNoteEvaluator(offset_ratio=0.2,
+                                                                  results_key=f'{tools.KEY_NOTE_OFF}-string')
                                            ] + pl_evaluators)
 
     # Keep all cached data/features here

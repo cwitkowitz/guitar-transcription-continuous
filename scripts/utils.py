@@ -1153,10 +1153,10 @@ def stacked_continuous_multi_pitch_to_stacked_pitch_list(stacked_discrete_multi_
         slice_discrete, slice_relative = stacked_discrete_multi_pitch[slc], stacked_relative_multi_pitch[slc]
 
         # Convert the multi pitch array to a pitch list
-        slice_pitch_list_ = continuous_multi_pitch_to_pitch_list(slice_discrete, slice_relative, profile)
+        _slice_pitch_list = continuous_multi_pitch_to_pitch_list(slice_discrete, slice_relative, profile)
 
         # Add the pitch list to the stacked pitch list dictionary under the slice key
-        stacked_pitch_list.update(tools.pitch_list_to_stacked_pitch_list(times, slice_pitch_list_, slc))
+        stacked_pitch_list.update(tools.pitch_list_to_stacked_pitch_list(times, _slice_pitch_list, slc))
 
     return stacked_pitch_list
 

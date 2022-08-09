@@ -74,9 +74,6 @@ class StackedPitchListWrapper(_StackedPitchListWrapper):
                                                                            stacked_relative_multi_pitch,
                                                                            times, self.profile)
 
-        # TODO - remove this after string-level evaluation is in place
-        stacked_pitch_list = tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)
-
         return stacked_pitch_list
 
 
