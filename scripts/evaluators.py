@@ -7,6 +7,8 @@ from amt_tools.evaluate import MultipitchEvaluator as _MultipitchEvaluator
 from amt_tools.evaluate import PitchListEvaluator as _PitchListEvaluator
 from amt_tools.evaluate import NoteEvaluator as _NoteEvaluator
 
+from string_level_metrics import precision_recall_f1_overlap as evaluate_notes
+
 import amt_tools.tools as tools
 
 import constants
@@ -53,11 +55,23 @@ class TablaturePitchListEvaluator(_StackedPitchListEvaluator):
 
 def get_sources_stacked_notes(stacked_notes):
     """
-    TODO
+    Obtain the sources corresponding to a collection of stacked notes if they were to be collapsed.
+
+    Parameters
+    ----------
+    stacked_notes : dict
+      Dictionary containing (slice -> (pitches, intervals)) pairs
+
+    Returns
+    ----------
+    sources : ndarray (N)
+      Array of key indices corresponding to each slice
+      N - number of notes
     """
 
+    # Obtain a list of the keys for each slice
     source_keys = list(stacked_notes.keys())
-
+    # Repeat each key index (source) for each note associated with the source
     sources = np.concatenate([[slc] * len(stacked_notes[key][0])
                               for slc, key in enumerate(source_keys)])
 
@@ -66,7 +80,8 @@ def get_sources_stacked_notes(stacked_notes):
 
 class TablatureNoteEvaluator(_StackedNoteEvaluator):
     """
-    TODO
+    Extension of NoteEvaluator which takes the source of
+    predictions and ground-truth into account when matching notes.
     """
 
     def evaluate(self, estimated, reference):
@@ -87,13 +102,29 @@ class TablatureNoteEvaluator(_StackedNoteEvaluator):
           Dictionary containing precision, recall, and f-measure
         """
 
-        # TODO
-
+        # Obtain the estimated note sources
         sources_est = get_sources_stacked_notes(estimated)
+        # Collapse the estimated notes
         pitches_est, intervals_est = tools.stacked_notes_to_notes(estimated)
 
+        # Obtain the ground-truth note sources
         sources_ref = get_sources_stacked_notes(reference)
+        # Collapse the ground-truth notes
         pitches_ref, intervals_ref = tools.stacked_notes_to_notes(reference)
+
+        # Convert notes to Hertz
+        pitches_ref = tools.notes_to_hz(pitches_ref)
+        pitches_est = tools.notes_to_hz(pitches_est)
+
+        # Calculate precision, recall, and f1 score of
+        # source-matched notes with or without offset
+        p, r, f, _ = evaluate_notes(ref_intervals=intervals_ref,
+                                    ref_pitches=pitches_ref,
+                                    ref_sources=sources_ref,
+                                    est_intervals=intervals_est,
+                                    est_pitches=pitches_est,
+                                    est_sources=sources_est,
+                                    offset_ratio=self.offset_ratio)
 
         # Package the results into a dictionary
         results = {

@@ -9,7 +9,7 @@ from amt_tools.features import CQT
 from amt_tools.train import train
 from amt_tools.transcribe import ComboEstimator, StackedNoteTranscriber, TablatureWrapper
 from inference import StackedPitchListTablatureWrapper
-from amt_tools.evaluate import *
+from amt_tools.evaluate import ComboEvaluator, LossWrapper, TablatureEvaluator, SoftmaxAccuracy
 from evaluators import *
 
 import amt_tools.tools as tools
