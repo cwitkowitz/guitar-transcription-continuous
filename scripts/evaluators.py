@@ -7,20 +7,88 @@ from amt_tools.evaluate import MultipitchEvaluator as _MultipitchEvaluator
 from amt_tools.evaluate import PitchListEvaluator as _PitchListEvaluator
 from amt_tools.evaluate import NoteEvaluator as _NoteEvaluator
 
-from string_level_metrics import precision_recall_f1_overlap as evaluate_notes
+from multipitch_metrics_string import multipitch_metrics as evaluate_multipitch
+from note_metrics_string import precision_recall_f1_overlap as evaluate_notes
 
 import amt_tools.tools as tools
 
-import constants
-import utils
-
 # Regular imports
+from mir_eval.multipitch import resample_multipitch
+from mir_eval import util
+
 import numpy as np
+
+
+def unroll_sources_stacked_pitch_list(stacked_pitch_list):
+    """
+    Unroll a stacked pitch list, differentiating pitch
+    observations from each slice with a new source attribute.
+
+    Parameters
+    ----------
+    stacked_pitch_list : dict
+      Dictionary containing (slice -> (times, pitch_list)) pairs
+
+    Returns
+    ----------
+    times : ndarray (N)
+      Time in seconds associated with each frame
+      N - number of time samples (frames)
+    pitch_list : list of ndarray (N x [...])
+      Array of pitches active across each frame
+    sources : ndarray (N)
+      Array of key indices corresponding to each source
+    """
+
+    # Initialize empty collections for pitch list contents
+    times, pitch_list, sources = np.empty(0), [], np.empty(0).astype(tools.INT)
+
+    # Loop through the contents of each slice of the stacked pitch list
+    for slc, (_times, _pitch_list) in enumerate(stacked_pitch_list.values()):
+        # Concatenate the pitch list contents for this slice
+        times, pitch_list = np.append(times, _times), pitch_list + _pitch_list
+        # Repeat each key index (source) for each observation (frame)
+        sources = np.append(sources, [slc] * len(_times))
+
+    return times, pitch_list, sources
+
+
+def resample_stacked_pitch_list(stacked_pitch_list, global_times=None):
+    """
+    Resample each pitch list in a stack to a common collection of times. If a
+    collection of times is not provided, it is derived from all unique times
+    within the stack.
+
+    Parameters
+    ----------
+    stacked_pitch_list : dict
+      Dictionary containing (slice -> (times, pitch_list)) pairs
+    global_times : ndarray (N) (Optional)
+      Array of global times for resampling
+      N - number of global time samples
+
+    Returns
+    ----------
+    stacked_pitch_list : dict
+      Dictionary containing (slice -> (times, pitch_list)) pairs
+    """
+
+    if global_times is None:
+        # Determine the global collection of times represented in the stack
+        global_times, _ = tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)
+
+    # Loop through the pitch list in each slice
+    for key, pitch_list in stacked_pitch_list.items():
+        # Resample the pitch list to align with the global times
+        stacked_pitch_list[key] = global_times, resample_multipitch(*pitch_list, global_times)
+
+    return stacked_pitch_list
 
 
 class TablaturePitchListEvaluator(_StackedPitchListEvaluator):
     """
-    TODO
+    Extension of PitchListEvaluator which takes the source of predictions
+    and ground-truth into account when matching pitch observations.
     """
 
     def evaluate(self, estimated, reference):
@@ -41,13 +109,37 @@ class TablaturePitchListEvaluator(_StackedPitchListEvaluator):
           Dictionary containing precision, recall, and f-measure
         """
 
-        # TODO
+        # Make sure both stacked pitch lists are filled uniformly
+        stacked_pitch_list_est = resample_stacked_pitch_list(estimated)
+        stacked_pitch_list_ref = resample_stacked_pitch_list(reference)
+
+        # Unroll the stacked pitch list estimates and obtain the observation sources
+        times_est, pitches_est, sources_est = unroll_sources_stacked_pitch_list(stacked_pitch_list_est)
+
+        # Unroll the stacked pitch list ground-truth and obtain the observation sources
+        times_ref, pitches_ref, sources_ref = unroll_sources_stacked_pitch_list(stacked_pitch_list_ref)
+
+        # Convert pitch lists to Hertz
+        pitches_ref = tools.pitch_list_to_hz(pitches_ref)
+        pitches_est = tools.pitch_list_to_hz(pitches_est)
+
+        # Calculate frame-wise precision, recall for continuous pitches
+        (p, r, _, _, _, _, _, _, _, _, _, _, _, _) = evaluate_multipitch(ref_time=times_ref,
+                                                                         ref_freqs=pitches_ref,
+                                                                         ref_sources=sources_ref,
+                                                                         est_time=times_est,
+                                                                         est_freqs=pitches_est,
+                                                                         est_sources=sources_est,
+                                                                         window=self.pitch_tolerance)
+
+        # Calculate the f1-score using the harmonic mean formula
+        f = util.f_measure(p, r)
 
         # Package the results into a dictionary
         results = {
-            tools.KEY_PRECISION : 0.,
-            tools.KEY_RECALL : 0.,
-            tools.KEY_F1 : 0.
+            tools.KEY_PRECISION : p,
+            tools.KEY_RECALL : r,
+            tools.KEY_F1 : f
         }
 
         return results
@@ -65,15 +157,15 @@ def get_sources_stacked_notes(stacked_notes):
     Returns
     ----------
     sources : ndarray (N)
-      Array of key indices corresponding to each slice
-      N - number of notes
+      Array of key indices corresponding to each source
+      N - total number of notes across the stack
     """
 
     # Obtain a list of the keys for each slice
     source_keys = list(stacked_notes.keys())
     # Repeat each key index (source) for each note associated with the source
     sources = np.concatenate([[slc] * len(stacked_notes[key][0])
-                              for slc, key in enumerate(source_keys)])
+                              for slc, key in enumerate(source_keys)]).astype(tools.INT)
 
     return sources
 
@@ -128,9 +220,9 @@ class TablatureNoteEvaluator(_StackedNoteEvaluator):
 
         # Package the results into a dictionary
         results = {
-            tools.KEY_PRECISION : 0.,
-            tools.KEY_RECALL : 0.,
-            tools.KEY_F1 : 0.
+            tools.KEY_PRECISION : p,
+            tools.KEY_RECALL : r,
+            tools.KEY_F1 : f
         }
 
         return results

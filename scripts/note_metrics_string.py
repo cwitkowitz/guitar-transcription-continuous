@@ -36,11 +36,6 @@ def match_notes(
 
     matching = []
 
-    # for testing:
-    #shuffle_idcs = np.arange(len(ref_pitches))
-    #np.random.shuffle(shuffle_idcs)
-    #est_pitches, est_intervals, est_sources = ref_pitches[shuffle_idcs], ref_intervals[shuffle_idcs], ref_sources[shuffle_idcs]
-
     # Obtain a collection of global indices for estimated and reference notes
     glb_ref_idcs, glb_est_idcs = np.arange(len(ref_pitches)), np.arange(len(est_pitches))
 
