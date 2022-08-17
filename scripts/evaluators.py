@@ -4,6 +4,7 @@
 from amt_tools.evaluate import StackedPitchListEvaluator as _StackedPitchListEvaluator
 from amt_tools.evaluate import StackedNoteEvaluator as _StackedNoteEvaluator
 from amt_tools.evaluate import MultipitchEvaluator as _MultipitchEvaluator
+from amt_tools.evaluate import TablatureEvaluator as _TablatureEvaluator
 from amt_tools.evaluate import PitchListEvaluator as _PitchListEvaluator
 from amt_tools.evaluate import NoteEvaluator as _NoteEvaluator
 
@@ -109,6 +110,9 @@ class TablaturePitchListEvaluator(_StackedPitchListEvaluator):
           Dictionary containing precision, recall, and f-measure
         """
 
+        # Initialize an empty dictionary to hold results for each tolerance
+        results = dict()
+
         # Make sure both stacked pitch lists are filled uniformly
         stacked_pitch_list_est = resample_stacked_pitch_list(estimated)
         stacked_pitch_list_ref = resample_stacked_pitch_list(reference)
@@ -123,24 +127,26 @@ class TablaturePitchListEvaluator(_StackedPitchListEvaluator):
         pitches_ref = tools.pitch_list_to_hz(pitches_ref)
         pitches_est = tools.pitch_list_to_hz(pitches_est)
 
-        # Calculate frame-wise precision, recall for continuous pitches
-        (p, r, _, _, _, _, _, _, _, _, _, _, _, _) = evaluate_multipitch(ref_time=times_ref,
-                                                                         ref_freqs=pitches_ref,
-                                                                         ref_sources=sources_ref,
-                                                                         est_time=times_est,
-                                                                         est_freqs=pitches_est,
-                                                                         est_sources=sources_est,
-                                                                         window=self.pitch_tolerance)
+        for tol in self.pitch_tolerances:
+            # Calculate frame-wise precision, recall for continuous pitches
+            (p, r, _, _, _, _, _, _, _, _, _, _, _, _) = evaluate_multipitch(ref_time=times_ref,
+                                                                             ref_freqs=pitches_ref,
+                                                                             ref_sources=sources_ref,
+                                                                             est_time=times_est,
+                                                                             est_freqs=pitches_est,
+                                                                             est_sources=sources_est,
+                                                                             window=tol)
 
-        # Calculate the f1-score using the harmonic mean formula
-        f = util.f_measure(p, r)
+            # Calculate the f1-score using the harmonic mean formula
+            f = util.f_measure(p, r)
 
-        # Package the results into a dictionary
-        results = {
-            tools.KEY_PRECISION : p,
-            tools.KEY_RECALL : r,
-            tools.KEY_F1 : f
-        }
+            # Package the results into a dictionary
+            results.update({
+                f'{tol}' : {
+                    tools.KEY_PRECISION : p,
+                    tools.KEY_RECALL : r,
+                    tools.KEY_F1 : f
+                }})
 
         return results
 
@@ -343,3 +349,91 @@ class NoteEvaluator(_NoteEvaluator):
         notes_ref = tools.notes_to_batched_notes(*tools.stacked_notes_to_notes(stacked_notes_ref))
 
         return notes_est, notes_ref
+
+
+class OnsetsEvaluator(MultipitchEvaluator):
+    """
+    Simple wrapper to evaluate stacked onsets estimates and ground-truth.
+    """
+
+    @staticmethod
+    def get_default_key():
+        """
+        Default key for onsets activation maps.
+        """
+
+        return tools.KEY_ONSETS
+
+
+class OffsetsEvaluator(MultipitchEvaluator):
+    """
+    Simple wrapper to evaluate stacked offsets estimates and ground-truth.
+    """
+
+    @staticmethod
+    def get_default_key():
+        """
+        Default key for offsets activation maps.
+        """
+
+        return tools.KEY_OFFSETS
+
+
+class TablatureOnsetEvaluator(_TablatureEvaluator):
+    """
+    Simple wrapper to evaluate string-level onsets as tablature.
+    """
+
+    @staticmethod
+    def get_default_key():
+        """
+        Default key for onsets activation maps.
+        """
+
+        return tools.KEY_ONSETS
+
+    def unpack(self, estimated, reference):
+        """
+        Attempt to unpack and convert stacked multi pitch data to tablature.
+
+        Parameters
+        ----------
+        estimated : dict
+          Dictionary containing stacked multi pitch estimate
+        reference : dict
+          Dictionary containing stacked multi pitch ground-truth
+
+        Returns
+        ----------
+        tablature_onsets_est : ndarray (S x T)
+          Estimated class membership for multiple DOFs
+          S - number of strings or degrees of freedom
+          T - number of frames
+        tablature_onsets_ref : ndarray (S x T)
+          Ground-truth class membership for multiple DOFs
+          S - number of strings or degrees of freedom
+          T - number of frames
+        """
+
+        # Call the parent function to unpack the stacked data
+        stacked_onsets_est, stacked_onsets_ref = super().unpack(estimated, reference)
+
+        # Collapse the stacked multi pitch arrays
+        tablature_onsets_est = tools.stacked_multi_pitch_to_tablature(stacked_onsets_est, self.profile)
+        tablature_onsets_ref = tools.stacked_multi_pitch_to_tablature(stacked_onsets_ref, self.profile)
+
+        return tablature_onsets_est, tablature_onsets_ref
+
+
+class TablatureOffsetEvaluator(TablatureOnsetEvaluator):
+    """
+    Simple wrapper to evaluate string-level offsets as tablature.
+    """
+
+    @staticmethod
+    def get_default_key():
+        """
+        Default key for offsets activation maps.
+        """
+
+        return tools.KEY_OFFSETS

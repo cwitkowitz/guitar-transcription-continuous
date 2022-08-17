@@ -12,6 +12,7 @@ import utils
 from copy import deepcopy
 
 import numpy as np
+import warnings
 import jams
 import muda
 import os
@@ -23,7 +24,7 @@ class GuitarSetPlus(GuitarSet):
     """
 
     # TODO - can I remove clutter by making other dataset signatures like this?
-    def __init__(self, semitone_width=0.5, augment=False, **kwargs):
+    def __init__(self, semitone_width=0.5, augment=False, evaluation_extras=False, **kwargs):
         """
         Initialize the dataset variant.
 
@@ -35,10 +36,13 @@ class GuitarSetPlus(GuitarSet):
           Scaling factor for relative pitch estimates
         augment : bool
           Whether to apply pitch shifting data augmentation
+        evaluation_extras : bool
+          Whether to compute/load extraneous data (for evaluation)
         """
 
         self.semitone_width = semitone_width
         self.augment = augment
+        self.evaluation_extras = evaluation_extras
 
         # Determine if the base directory argument was provided
         base_dir = kwargs.pop('base_dir', None)
@@ -57,6 +61,9 @@ class GuitarSetPlus(GuitarSet):
             kwargs.update({'store_data': False})
 
         super().__init__(**kwargs)
+
+        if not self.evaluation_extras and self.save_data:
+            warnings.warn('Evaluation extras will be excluded from saved data.', category=RuntimeWarning)
 
     def load(self, track):
         """
@@ -119,13 +126,15 @@ class GuitarSetPlus(GuitarSet):
                 jams_data = next(muda.deformers.PitchShift(n_semitones=semitone_shift).transform(jams_data))
 
                 # Extract the augmented audio from the JAMS data
-                audio = jams_data.sandbox.muda._audio['y']
                 fs = jams_data.sandbox.muda._audio['sr']
+                audio = jams_data.sandbox.muda._audio['y']
 
             # Load the notes by string from the JAMS data
             stacked_notes = tools.extract_stacked_notes_jams(jams_data)
 
-            # Represent the string-wise notes as a stacked multi pitch array
+            # Represent the string-wise notes as stacked multi pitch arrays
+            stacked_onsets = tools.stacked_notes_to_stacked_onsets(stacked_notes, times, self.profile)
+            stacked_offsets = tools.stacked_notes_to_stacked_offsets(stacked_notes, times, self.profile)
             stacked_multi_pitch = tools.stacked_notes_to_stacked_multi_pitch(stacked_notes, times, self.profile)
 
             # Convert the stacked multi pitch array into tablature
@@ -167,12 +176,17 @@ class GuitarSetPlus(GuitarSet):
             # Add all relevant ground-truth to the dictionary
             data.update({tools.KEY_FS : fs,
                          tools.KEY_AUDIO : audio,
-                         tools.KEY_MULTIPITCH : stacked_multi_pitch,
-                         tools.KEY_TABLATURE : tablature,
-                         tools.KEY_PITCHLIST : stacked_pitch_list,
+                         tools.KEY_TABLATURE: tablature,
                          constants.KEY_TABLATURE_ADJ : adjusted_multi_pitch,
-                         constants.KEY_TABLATURE_REL : relative_multi_pitch,
-                         tools.KEY_NOTES : stacked_notes})
+                         constants.KEY_TABLATURE_REL : relative_multi_pitch})
+
+            if self.evaluation_extras:
+                # Add evaluation extras to the dictionary
+                data.update({tools.KEY_NOTES: stacked_notes,
+                             tools.KEY_ONSETS: stacked_onsets,
+                             tools.KEY_OFFSETS: stacked_offsets,
+                             tools.KEY_MULTIPITCH: stacked_multi_pitch,
+                             tools.KEY_PITCHLIST: stacked_pitch_list})
 
             if self.save_data:
                 # Get the appropriate path for saving the track data
@@ -180,10 +194,12 @@ class GuitarSetPlus(GuitarSet):
 
                 # Create a copy of the data
                 data_to_save = deepcopy(data)
-                # Package the stacked pitch list into save-friendly format
-                data_to_save.update({tools.KEY_PITCHLIST : tools.pack_stacked_representation(stacked_pitch_list)})
-                # Package the stacked notes into save-friendly format
-                data_to_save.update({tools.KEY_NOTES : tools.pack_stacked_representation(stacked_notes)})
+
+                if self.evaluation_extras:
+                    # Package the stacked notes into save-friendly format
+                    data_to_save.update({tools.KEY_NOTES : tools.pack_stacked_representation(stacked_notes)})
+                    # Package the stacked pitch list into save-friendly format
+                    data_to_save.update({tools.KEY_PITCHLIST : tools.pack_stacked_representation(stacked_pitch_list)})
 
                 # Save the data as a NumPy zip file
                 tools.save_dict_npz(gt_path, data_to_save)

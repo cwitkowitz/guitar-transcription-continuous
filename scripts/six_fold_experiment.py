@@ -1,15 +1,25 @@
 # Author: Frank Cwitkowitz <fcwitkow@ur.rochester.edu>
 
 # My imports
-from tabcnn_variants import TabCNNLogisticContinuous as TabCNN
+#from tabcnn_variants import TabCNNLogisticContinuous as TabCNN
 from GuitarSet import GuitarSetPlus as GuitarSet
-#from amt_tools.models import TabCNN
+from amt_tools.models import TabCNN
 from amt_tools.features import CQT
 
 from amt_tools.train import train
-from amt_tools.transcribe import ComboEstimator, StackedNoteTranscriber, TablatureWrapper
+from amt_tools.transcribe import ComboEstimator, \
+                                 TablatureWrapper, \
+                                 StackedOnsetsWrapper, \
+                                 StackedOffsetsWrapper, \
+                                 StackedNoteTranscriber
 from inference import StackedPitchListTablatureWrapper
-from amt_tools.evaluate import ComboEvaluator, LossWrapper, TablatureEvaluator, SoftmaxAccuracy
+from amt_tools.evaluate import ComboEvaluator, \
+                               LossWrapper, \
+                               TablatureEvaluator, \
+                               SoftmaxAccuracy, \
+                               validate, \
+                               append_results, \
+                               average_results
 from evaluators import *
 
 import amt_tools.tools as tools
@@ -48,7 +58,7 @@ def config():
     iterations = 2500
 
     # How many equally spaced save/validation checkpoints - 0 to disable
-    checkpoints = 50
+    checkpoints = 25
 
     # Number of samples to gather for a batch
     batch_size = 30
@@ -100,6 +110,10 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
     validation_estimator = ComboEstimator([
         # Discrete tablature -> stacked multi pitch array
         TablatureWrapper(profile=profile),
+        # Stacked multi pitch array -> stacked onsets array
+        StackedOnsetsWrapper(profile=profile),
+        # Stacked multi pitch array -> stacked offsets array
+        StackedOffsetsWrapper(profile=profile),
         # Stacked multi pitch array -> stacked notes
         StackedNoteTranscriber(profile=profile),
         # Continuous tablature arrays -> stacked pitch list
@@ -108,29 +122,33 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                          multi_pitch_rel_key=constants.KEY_TABLATURE_REL)])
 
     # Fractions of semitone to use for tolerances when evaluating pitch lists
-    divs = [2, 4, 8, 16]
-
-    # Create a collection of pitch list evaluators spanning various pitch resolutions
-    pl_evaluators = [PitchListEvaluator(pitch_tolerance=(1 / div),
-                                        results_key=f'{tools.KEY_PITCHLIST}_1_{div}') for div in divs]
-    pl_evaluators += [TablaturePitchListEvaluator(pitch_tolerance=(1 / div),
-                                                  results_key=f'{tools.KEY_PITCHLIST}-string_1_{div}') for div in divs]
+    tols = np.array([2, 4, 8, 16], dtype=float) ** -1
 
     # Initialize the evaluation pipeline
     validation_evaluator = ComboEvaluator([LossWrapper(),
+                                           OnsetsEvaluator(),
+                                           OffsetsEvaluator(),
                                            MultipitchEvaluator(),
+                                           TablatureOnsetEvaluator(profile=profile,
+                                                                   results_key=f'string-{tools.KEY_ONSETS}'),
+                                           TablatureOffsetEvaluator(profile=profile,
+                                                                    results_key=f'string-{tools.KEY_OFFSETS}'),
                                            TablatureEvaluator(profile=profile),
                                            SoftmaxAccuracy(),
                                            NoteEvaluator(results_key=tools.KEY_NOTE_ON),
                                            NoteEvaluator(offset_ratio=0.2,
                                                          results_key=tools.KEY_NOTE_OFF),
-                                           TablatureNoteEvaluator(results_key=f'{tools.KEY_NOTE_ON}-string'),
+                                           TablatureNoteEvaluator(results_key=f'string-{tools.KEY_NOTE_ON}'),
                                            TablatureNoteEvaluator(offset_ratio=0.2,
-                                                                  results_key=f'{tools.KEY_NOTE_OFF}-string')
-                                           ] + pl_evaluators)
+                                                                  results_key=f'string-{tools.KEY_NOTE_OFF}'),
+                                           PitchListEvaluator(pitch_tolerances=tols),])
+                                           #TablaturePitchListEvaluator(pitch_tolerances=tols,
+                                           #                            results_key=f'string-{tools.KEY_PITCHLIST}')])
 
     # Keep all cached data/features here
     gset_cache = os.path.join('..', 'generated', 'data')
+    gset_cache_train = os.path.join(gset_cache, 'train') # No extras
+    gset_cache_val = os.path.join(gset_cache, 'val') # Includes extras
 
     # Get a list of the GuitarSet splits
     splits = GuitarSet.available_splits()
@@ -165,15 +183,16 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                    num_frames=num_frames,
                                    data_proc=data_proc,
                                    profile=profile,
-                                   save_loc=gset_cache,
+                                   save_loc=gset_cache_train,
                                    semitone_width=semitone_width,
-                                   augment=False)
+                                   augment=False,
+                                   evaluation_extras=False)
 
             # Create a PyTorch data loader for the dataset
             train_loader = DataLoader(dataset=gset_train,
                                       batch_size=batch_size,
                                       shuffle=True,
-                                      num_workers=4,
+                                      num_workers=0,
                                       drop_last=True)
 
             print(f'Loading testing partition (player {test_splits[0]})...')
@@ -186,9 +205,10 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                   num_frames=None,
                                   data_proc=data_proc,
                                   profile=profile,
-                                  store_data=False,
-                                  save_loc=gset_cache,
-                                  semitone_width=semitone_width)
+                                  store_data=(not validation_split),
+                                  save_loc=gset_cache_val,
+                                  semitone_width=semitone_width,
+                                  evaluation_extras=True)
 
             if validation_split:
                 print(f'Loading validation partition (player {val_splits[0]})...')
@@ -202,8 +222,9 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                      data_proc=data_proc,
                                      profile=profile,
                                      store_data=True,
-                                     save_loc=gset_cache,
-                                     semitone_width=semitone_width)
+                                     save_loc=gset_cache_val,
+                                     semitone_width=semitone_width,
+                                     evaluation_extras=True)
             else:
                 # Validate on the test set
                 gset_val = gset_test
@@ -213,9 +234,9 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                             profile=profile,
                             in_channels=data_proc.get_num_channels(),
                             model_complexity=model_complexity,
-                            lmbda=10,
-                            semitone_width=semitone_width,
-                            gamma=10,
+                            #lmbda=10,
+                            #semitone_width=semitone_width,
+                            #gamma=10,
                             device=gpu_id)
             tabcnn.change_device()
             tabcnn.train()

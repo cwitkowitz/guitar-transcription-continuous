@@ -850,7 +850,7 @@ def streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None, su
     """
 
     # Unpack the note attributes, removing notes with out-of-bounds nominal pitch
-    pitches, intervals = tools.filter_notes(*notes, profile, suppress_warnings)
+    pitches, intervals = tools.filter_notes(*notes, profile, suppress_warnings=suppress_warnings)
 
     # Unpack the pitch list attributes
     _times, _pitch_list = pitch_list

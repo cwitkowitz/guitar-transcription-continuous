@@ -176,8 +176,9 @@ class StackedPitchListTablatureWrapper(StackedPitchListWrapper):
         raw_output[self.multi_pitch_key] = \
             tools.tablature_to_stacked_multi_pitch(raw_output[self.multi_pitch_key], self.profile)
 
-        # Obtain a stacked multi pitch array representation of the relative pitch
-        raw_output[self.multi_pitch_rel_key] = \
-            tools.logistic_to_stacked_multi_pitch(raw_output[self.multi_pitch_rel_key], self.profile, False)
+        if tools.query_dict(raw_output, self.multi_pitch_rel_key):
+            # Obtain a stacked multi pitch array representation of the relative pitch
+            raw_output[self.multi_pitch_rel_key] = \
+                tools.logistic_to_stacked_multi_pitch(raw_output[self.multi_pitch_rel_key], self.profile, False)
 
         return raw_output
