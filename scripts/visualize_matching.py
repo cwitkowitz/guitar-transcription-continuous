@@ -162,9 +162,6 @@ if __name__ == '__main__':
                     n_bins=192,
                     bins_per_octave=24)
 
-    # All cached data/features kept here
-    gset_cache = os.path.join('..', 'generated', 'data')
-
     # Initialize the dataset to visualize
     tablature_data = GuitarSet(base_dir=None,
                                hop_length=hop_length,
@@ -172,8 +169,7 @@ if __name__ == '__main__':
                                data_proc=data_proc,
                                profile=profile,
                                save_data=False,
-                               store_data=False,
-                               save_loc=gset_cache)
+                               store_data=False)
 
     # Construct a path to the base directory for saving visualizations
     save_dir = os.path.join('..', 'generated', 'visualization', 'matching')
@@ -184,7 +180,7 @@ if __name__ == '__main__':
 
     kwargs = {'semitone_width' : 1.0, # semitones
               'stream_tolerance' : 0.4, # semitones
-              'minimum_contour_duration' : 6, # milliseconds
+              'minimum_contour_duration' : 18, # milliseconds
               'attempt_corrections' : True,
               'suppress_warnings' : False}
 

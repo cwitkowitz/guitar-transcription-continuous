@@ -185,10 +185,6 @@ class PitchContour(object):
         # Represent the observations as a pitch list
         pitch_list = [np.array([p]) for p in self.pitch_observations]
 
-        if tools.contains_empties_pitch_list(pitch_list):
-            # TODO - tools.clean_pitch_list()? is it even necessary?
-            print()
-
         if _times is not None:
             # Obtain times corresponding to the observations
             times = self.get_times(_times)
@@ -247,9 +243,6 @@ class PitchContour(object):
         # Slice the specified region of the observations
         region_observations = self.pitch_observations[idx_start : idx_stop]
 
-        # Make sure null observations do not influence the statistics
-        #region_observations = self.discard_null_observations(region_observations)
-
         # Compute the mean of the remaining observations
         average = np.mean(region_observations)
 
@@ -271,7 +264,6 @@ class PitchContour(object):
         """
 
         # Make sure null observations do not influence the statistics
-        #observations = self.discard_null_observations(self.pitch_observations)
         observations = self.pitch_observations
 
         # Obtain the specified percentile of the remaining observations
@@ -283,13 +275,6 @@ class PitchContour(object):
 class ContourTracker(object):
     """
     Class to maintain state while parsing pitch lists to track pitch contours.
-
-    TODO - this is an excellent place to resample a pitch list that should avoid
-           the pitfalls of undersampling; after tracking contours, can linearly
-           interpolate them to obtain pitch observations at arbitrary times. Then,
-           can take a collection of arbitrary times and attempt to place pitches
-           that occur within frame times rather than pitches that occur at frame
-           times!!
     """
 
     def __init__(self):
@@ -596,6 +581,14 @@ def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=T
 
     # Make sure the pitch list is not empty
     if num_frames:
+        # Estimate the duration of the track (for bounding note offsets)
+        _times = np.append(_times, _times[-1] + tools.estimate_hop_length(_times))
+
+        # Remove notes with out-of-bounds intervals
+        pitches, intervals = tools.filter_notes(pitches, intervals,
+                                                min_time=np.min(_times),
+                                                max_time=np.max(_times))
+
         # Determine how many notes were provided
         num_notes = len(pitches)
 
