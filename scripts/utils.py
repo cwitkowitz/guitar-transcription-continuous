@@ -6,6 +6,7 @@ from math import floor, ceil
 
 import numpy as np
 import warnings
+import librosa
 
 
 def detect_overlap_notes(intervals, decimals=3):
@@ -185,6 +186,9 @@ class PitchContour(object):
         # Represent the observations as a pitch list
         pitch_list = [np.array([p]) for p in self.pitch_observations]
 
+        # Make sure there are no null observations in the pitch list
+        pitch_list = tools.clean_pitch_list(pitch_list)
+
         if _times is not None:
             # Obtain times corresponding to the observations
             times = self.get_times(_times)
@@ -243,6 +247,9 @@ class PitchContour(object):
         # Slice the specified region of the observations
         region_observations = self.pitch_observations[idx_start : idx_stop]
 
+        # Make sure null observations do not influence the statistics
+        region_observations = self.discard_null_observations(region_observations)
+
         # Compute the mean of the remaining observations
         average = np.mean(region_observations)
 
@@ -264,7 +271,7 @@ class PitchContour(object):
         """
 
         # Make sure null observations do not influence the statistics
-        observations = self.pitch_observations
+        observations = self.discard_null_observations(self.pitch_observations)
 
         # Obtain the specified percentile of the remaining observations
         value = np.percentile(observations, 100 * percentile) if len(observations) else np.nan
@@ -1157,6 +1164,122 @@ def stacked_continuous_multi_pitch_to_stacked_pitch_list(stacked_discrete_multi_
 ##################################################
 # CURRENTLY UNUSED                               #
 ##################################################
+
+
+def stacked_grouping_to_grouping(stacked_grouping):
+    """
+    Collapse a stack of note-contour groupings into a single representation.
+
+    Parameters
+    ----------
+    stacked_grouping : dict
+      Dictionary containing (slice -> {note_idx -> [PitchContour]}) pairs
+
+    Returns
+    ----------
+    grouping : (note, [contours]) pairs : dict
+      Dictionary containing (note_idx -> [PitchContour]) pairs
+    """
+
+    # Initialize a dictionary to hold (note, [contours]) pairs from all slices
+    grouping = dict()
+
+    # Initialize a note index offset to avoid overlap across slices
+    index_offset = 0
+
+    # Loop through the grouping of each slice
+    for slice_grouping in stacked_grouping:
+        # Convert the note index keys to an array and added the current offset
+        note_idcs = np.array(list(slice_grouping.keys())) + index_offset
+        # Add the entries from the grouping of this slice to the collapsed dictionary
+        grouping.update(dict(zip(note_idcs, slice_grouping.values())))
+        # Increment the note index offset by the amount of notes added
+        index_offset += len(note_idcs)
+
+    # TODO - note indices do not match collapsed stacked notes sorting
+
+    return grouping
+
+
+def get_note_contour_grouping_by_index(jam, times):
+    """
+    Parse JAMS data to obtain a grouping between note indices and pitch
+    observations based off of the "index" field of each observation.
+
+    Parameters
+    ----------
+    jam : JAMS object
+      JAMS file data
+    times : ndarray (N)
+      Times in seconds for computing frame indices
+      N - number of time samples
+
+    Returns
+    ----------
+    stacked_grouping : dict
+      Dictionary containing (slice -> {note_idx -> [PitchContour]}) pairs
+    """
+
+    # Extract all of the pitch annotations
+    pitch_data_slices = jam.annotations[tools.JAMS_PITCH_HZ]
+
+    # Obtain the number of annotations
+    stack_size = len(pitch_data_slices)
+
+    # Initialize dictionaries to hold (note, [contours]) pairs
+    stacked_grouping = [dict() for _ in range(stack_size)]
+
+    # Estimate the duration from the array of times
+    _times = np.append(times, times[-1] + tools.estimate_hop_length(times))
+
+    # Loop through the slices of the stack
+    for slc in range(stack_size):
+        # Extract the pitch observations of this slice
+        slice_pitches = pitch_data_slices[slc]
+
+        # Loop through the pitch observations
+        for pitch in slice_pitches:
+            # Extract the time, pitch and note index
+            time = pitch.time
+            freq = pitch.value['frequency']
+            note_idx = pitch.value['index']
+
+            if freq != 0 and pitch.value['voiced']:
+                # Convert frequency from Hertz to MIDI
+                freq = librosa.hz_to_midi(freq)
+            else:
+                # Represent unvoiced frequencies as zero
+                freq = 0
+
+            if time < np.min(_times) or time > np.max(_times):
+                # There is no corresponding frame index, throw a warning
+                warnings.warn('Ignoring pitch observation outside range '
+                              'of provided times.', category=RuntimeWarning)
+            else:
+                # Determine to which index the observation time corresponds
+                frame_idx = np.argmin(np.abs(_times - time))
+
+                #print(f'Note Idx : {note_idx} | Time : {time} | Frame Idx : {frame_idx} | Freq : {freq}')
+
+                if note_idx in stacked_grouping[slc]:
+                    # Obtain a pointer to the preexisting tracked contour
+                    tracked_contour = stacked_grouping[slc][note_idx][0]
+                    # Determine the expected frame index based on what has already been tracked
+                    expected_frame_idx = tracked_contour.onset_idx + \
+                                         len(tracked_contour.pitch_observations)
+                    # Check that the next frame index matches expectations
+                    if frame_idx != expected_frame_idx and freq != 0:
+                        # The frame index does not align with expectations, throw a warning
+                        warnings.warn('Mismatched expectation for the frame index of the '
+                                      'next observation for contour.', category=RuntimeWarning)
+                    if frame_idx >= expected_frame_idx:
+                        # Add the new pitch observation to the tracked contour
+                        tracked_contour.append_observation(freq)
+                else:
+                    # Create an entry for the new pitch contour
+                    stacked_grouping[slc][note_idx] = [PitchContour(freq, frame_idx)]
+
+    return stacked_grouping
 
 
 def fill_empties(pitch_list):
