@@ -535,130 +535,6 @@ class ContourTracker(object):
         return values
 
 
-def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=True):
-    """
-    Associate pitch contours in a pitch list with a collection of notes, based off of
-    the observations which occur within the note intervals. This function does support
-    polyphonic data and should function robustly under most circumstances, as long the
-    note and pitch contour data provided is tightly aligned with no same-pitch notes
-    played in unison or overlapping pitch contours with significant deviation from the
-    nominal pitches of their note sources.
-
-    Parameters
-    ----------
-    notes : tuple (pitches, intervals)
-      pitches : ndarray (K)
-        Array of pitches corresponding to notes in MIDI format
-      intervals : ndarray (K x 2)
-        Array of onset-offset time pairs corresponding to (non-overlapping) notes
-      (K - number of notes)
-    pitch_list : tuple (_times, pitch_list)
-      pitch_list : list of ndarray (N x [...])
-        Collection of MIDI pitches corresponding to (non-overlapping) notes
-      _times : ndarray (N)
-        Time in seconds of beginning of each frame
-      (N - number of pitch observations (frames))
-    suppress_warnings : bool
-      Whether to ignore warning messages
-
-    Returns
-    ----------
-    grouping : (note, [contours]) pairs : dict
-      Dictionary containing (note_idx -> [PitchContour]) pairs
-    """
-
-    # Unpack the note attributes
-    pitches, intervals = notes
-
-    # Unpack the pitch list attributes
-    _times, pitch_list = pitch_list
-    # Make sure there are no null observations in the pitch list
-    pitch_list = tools.clean_pitch_list(pitch_list)
-
-    # Check if there is any overlap within the streams
-    if (detect_overlap_notes(intervals) or detect_overlap_pitch_list(pitch_list)) and not suppress_warnings:
-        warnings.warn('Overlapping streams were provided. Will attempt ' +
-                      'to infer note-pitch groupings.', category=RuntimeWarning)
-
-    # Determine the dimensionality for the multi pitch array
-    num_frames = len(_times)
-
-    # Initialize a dictionary to hold (note, [contours]) pairs
-    grouping = dict()
-
-    # Make sure the pitch list is not empty
-    if num_frames:
-        # Estimate the duration of the track (for bounding note offsets)
-        _times = np.append(_times, _times[-1] + tools.estimate_hop_length(_times))
-
-        # Remove notes with out-of-bounds intervals
-        pitches, intervals = tools.filter_notes(pitches, intervals,
-                                                min_time=np.min(_times),
-                                                max_time=np.max(_times))
-
-        # Determine how many notes were provided
-        num_notes = len(pitches)
-
-        # Duplicate the array of times for each note and stack along a new axis
-        _times_broadcast = np.concatenate([[_times]] * max(1, num_notes), axis=0)
-
-        # Determine the frame where each note begins and ends
-        onset_idcs = np.argmin((_times_broadcast <= intervals[..., :1]), axis=1) - 1
-        offset_idcs = np.argmin((_times_broadcast <= intervals[..., 1:]), axis=1) - 1
-
-        # Clip all onsets/offsets at first/last frame - these will end up
-        # at -1 from previous operation if they occurred beyond boundaries
-        onset_idcs[onset_idcs == -1], offset_idcs[offset_idcs == -1] = 0, num_frames - 1
-
-        # Loop through each note
-        for i in range(num_notes):
-            # Keep track of adjusted note boundaries without modifying original values
-            adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
-
-            # Adjust the onset index to the first frame with non-empty pitch observations
-            while not len(pitch_list[adjusted_onset]) and adjusted_onset <= adjusted_offset:
-                adjusted_onset += 1
-
-            # Adjust the offset index to the last frame with non-empty pitch observations
-            while not len(pitch_list[adjusted_offset]) and adjusted_offset >= adjusted_onset:
-                adjusted_offset -= 1
-
-            # Check that there are non-empty pitch observations
-            if adjusted_onset <= adjusted_offset:
-                # Extract the (cropped) pitch observations within the note interval
-                pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
-            else:
-                if not suppress_warnings:
-                    # TODO - occurs quite frequently for notes with small
-                    #        duration if the pitch list is undersampled.
-                    # There are no non-empty pitch observations, throw a warning
-                    warnings.warn('No pitch observations occur within the note interval. ' +
-                                  'Inserting average pitch of note instead.', category=RuntimeWarning)
-                # Reset the interval to the original note boundaries
-                adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
-                # Populate the frames with the average pitch of the note
-                pitch_observations = [np.array([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
-
-            # Check if there are any empty observations remaining
-            if tools.contains_empties_pitch_list(pitch_observations) and not suppress_warnings:
-                # There are some gaps in the observations, throw a warning
-                warnings.warn('Missing pitch observations within note interval. ' +
-                              'Will attempt to interpolate gaps.', category=RuntimeWarning)
-
-            # Convert the cropped pitch list to an array of monophonic pitches, choosing
-            # the pitch closest to the nominal value of the note if a frame is polyphonic
-            pitch_observations = np.array([p[np.argmin(np.abs(p - pitches[i]))]
-                                           if len(p) else 0. for p in pitch_observations])
-
-            # Interpolate between gaps in pitch observations
-            pitch_observations = tools.interpolate_gaps(pitch_observations)
-
-            # Create a new entry for the note and the extracted pitch list
-            grouping[i] = [PitchContour(pitch_observations, adjusted_onset)]
-
-    return grouping
-
-
 def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, stream_tolerance=1.0,
                                          minimum_contour_duration=None, attempt_corrections=False,
                                          suppress_warnings=True):
@@ -1280,6 +1156,130 @@ def get_note_contour_grouping_by_index(jam, times):
                     stacked_grouping[slc][note_idx] = [PitchContour(freq, frame_idx)]
 
     return stacked_grouping
+
+
+def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=True):
+    """
+    Associate pitch contours in a pitch list with a collection of notes, based off of
+    the observations which occur within the note intervals. This function does support
+    polyphonic data and should function robustly under most circumstances, as long the
+    note and pitch contour data provided is tightly aligned with no same-pitch notes
+    played in unison or overlapping pitch contours with significant deviation from the
+    nominal pitches of their note sources.
+
+    Parameters
+    ----------
+    notes : tuple (pitches, intervals)
+      pitches : ndarray (K)
+        Array of pitches corresponding to notes in MIDI format
+      intervals : ndarray (K x 2)
+        Array of onset-offset time pairs corresponding to (non-overlapping) notes
+      (K - number of notes)
+    pitch_list : tuple (_times, pitch_list)
+      pitch_list : list of ndarray (N x [...])
+        Collection of MIDI pitches corresponding to (non-overlapping) notes
+      _times : ndarray (N)
+        Time in seconds of beginning of each frame
+      (N - number of pitch observations (frames))
+    suppress_warnings : bool
+      Whether to ignore warning messages
+
+    Returns
+    ----------
+    grouping : (note, [contours]) pairs : dict
+      Dictionary containing (note_idx -> [PitchContour]) pairs
+    """
+
+    # Unpack the note attributes
+    pitches, intervals = notes
+
+    # Unpack the pitch list attributes
+    _times, pitch_list = pitch_list
+    # Make sure there are no null observations in the pitch list
+    pitch_list = tools.clean_pitch_list(pitch_list)
+
+    # Check if there is any overlap within the streams
+    if (detect_overlap_notes(intervals) or detect_overlap_pitch_list(pitch_list)) and not suppress_warnings:
+        warnings.warn('Overlapping streams were provided. Will attempt ' +
+                      'to infer note-pitch groupings.', category=RuntimeWarning)
+
+    # Determine the dimensionality for the multi pitch array
+    num_frames = len(_times)
+
+    # Initialize a dictionary to hold (note, [contours]) pairs
+    grouping = dict()
+
+    # Make sure the pitch list is not empty
+    if num_frames:
+        # Estimate the duration of the track (for bounding note offsets)
+        _times = np.append(_times, _times[-1] + tools.estimate_hop_length(_times))
+
+        # Remove notes with out-of-bounds intervals
+        pitches, intervals = tools.filter_notes(pitches, intervals,
+                                                min_time=np.min(_times),
+                                                max_time=np.max(_times))
+
+        # Determine how many notes were provided
+        num_notes = len(pitches)
+
+        # Duplicate the array of times for each note and stack along a new axis
+        _times_broadcast = np.concatenate([[_times]] * max(1, num_notes), axis=0)
+
+        # Determine the frame where each note begins and ends
+        onset_idcs = np.argmin((_times_broadcast <= intervals[..., :1]), axis=1) - 1
+        offset_idcs = np.argmin((_times_broadcast <= intervals[..., 1:]), axis=1) - 1
+
+        # Clip all onsets/offsets at first/last frame - these will end up
+        # at -1 from previous operation if they occurred beyond boundaries
+        onset_idcs[onset_idcs == -1], offset_idcs[offset_idcs == -1] = 0, num_frames - 1
+
+        # Loop through each note
+        for i in range(num_notes):
+            # Keep track of adjusted note boundaries without modifying original values
+            adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
+
+            # Adjust the onset index to the first frame with non-empty pitch observations
+            while not len(pitch_list[adjusted_onset]) and adjusted_onset <= adjusted_offset:
+                adjusted_onset += 1
+
+            # Adjust the offset index to the last frame with non-empty pitch observations
+            while not len(pitch_list[adjusted_offset]) and adjusted_offset >= adjusted_onset:
+                adjusted_offset -= 1
+
+            # Check that there are non-empty pitch observations
+            if adjusted_onset <= adjusted_offset:
+                # Extract the (cropped) pitch observations within the note interval
+                pitch_observations = pitch_list[adjusted_onset : adjusted_offset + 1]
+            else:
+                if not suppress_warnings:
+                    # TODO - occurs quite frequently for notes with small
+                    #        duration if the pitch list is undersampled.
+                    # There are no non-empty pitch observations, throw a warning
+                    warnings.warn('No pitch observations occur within the note interval. ' +
+                                  'Inserting average pitch of note instead.', category=RuntimeWarning)
+                # Reset the interval to the original note boundaries
+                adjusted_onset, adjusted_offset = onset_idcs[i], offset_idcs[i]
+                # Populate the frames with the average pitch of the note
+                pitch_observations = [np.array([pitches[i]])] * (adjusted_offset + 1 - adjusted_onset)
+
+            # Check if there are any empty observations remaining
+            if tools.contains_empties_pitch_list(pitch_observations) and not suppress_warnings:
+                # There are some gaps in the observations, throw a warning
+                warnings.warn('Missing pitch observations within note interval. ' +
+                              'Will attempt to interpolate gaps.', category=RuntimeWarning)
+
+            # Convert the cropped pitch list to an array of monophonic pitches, choosing
+            # the pitch closest to the nominal value of the note if a frame is polyphonic
+            pitch_observations = np.array([p[np.argmin(np.abs(p - pitches[i]))]
+                                           if len(p) else 0. for p in pitch_observations])
+
+            # Interpolate between gaps in pitch observations
+            pitch_observations = tools.interpolate_gaps(pitch_observations)
+
+            # Create a new entry for the note and the extracted pitch list
+            grouping[i] = [PitchContour(pitch_observations, adjusted_onset)]
+
+    return grouping
 
 
 def fill_empties(pitch_list):
