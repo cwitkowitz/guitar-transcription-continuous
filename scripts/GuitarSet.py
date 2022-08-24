@@ -107,7 +107,9 @@ class GuitarSetPlus(GuitarSet):
             # Construct the path to the track's audio
             wav_path = self.get_wav_path(track)
             # Load and normalize the audio along with the sampling rate
-            audio, fs = tools.load_normalize_audio(wav_path, self.sample_rate)
+            audio, fs = tools.load_normalize_audio(wav_path,
+                                                   fs=self.sample_rate,
+                                                   norm=self.audio_norm)
 
             # We need the frame times for the tablature
             times = self.data_proc.get_times(audio)

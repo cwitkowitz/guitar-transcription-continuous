@@ -1042,41 +1042,6 @@ def stacked_continuous_multi_pitch_to_stacked_pitch_list(stacked_discrete_multi_
 ##################################################
 
 
-def stacked_grouping_to_grouping(stacked_grouping):
-    """
-    Collapse a stack of note-contour groupings into a single representation.
-
-    Parameters
-    ----------
-    stacked_grouping : dict
-      Dictionary containing (slice -> {note_idx -> [PitchContour]}) pairs
-
-    Returns
-    ----------
-    grouping : (note, [contours]) pairs : dict
-      Dictionary containing (note_idx -> [PitchContour]) pairs
-    """
-
-    # Initialize a dictionary to hold (note, [contours]) pairs from all slices
-    grouping = dict()
-
-    # Initialize a note index offset to avoid overlap across slices
-    index_offset = 0
-
-    # Loop through the grouping of each slice
-    for slice_grouping in stacked_grouping:
-        # Convert the note index keys to an array and added the current offset
-        note_idcs = np.array(list(slice_grouping.keys())) + index_offset
-        # Add the entries from the grouping of this slice to the collapsed dictionary
-        grouping.update(dict(zip(note_idcs, slice_grouping.values())))
-        # Increment the note index offset by the amount of notes added
-        index_offset += len(note_idcs)
-
-    # TODO - note indices do not match collapsed stacked notes sorting
-
-    return grouping
-
-
 def get_note_contour_grouping_by_index(jam, times):
     """
     Parse JAMS data to obtain a grouping between note indices and pitch
@@ -1092,18 +1057,25 @@ def get_note_contour_grouping_by_index(jam, times):
 
     Returns
     ----------
-    stacked_grouping : dict
-      Dictionary containing (slice -> {note_idx -> [PitchContour]}) pairs
+    grouping : (note, [contours]) pairs : dict
+      Dictionary containing (note_idx -> [PitchContour]) pairs
     """
 
-    # Extract all of the pitch annotations
+    # Extract all of the pitch and note annotations
     pitch_data_slices = jam.annotations[tools.JAMS_PITCH_HZ]
+    note_data_slices = jam.annotations[tools.JAMS_NOTE_MIDI]
 
     # Obtain the number of annotations
     stack_size = len(pitch_data_slices)
 
-    # Initialize dictionaries to hold (note, [contours]) pairs
-    stacked_grouping = [dict() for _ in range(stack_size)]
+    # Initialize a dictionary to hold (note, [contours]) pairs
+    grouping = dict()
+
+    # Initialize a note index offset to avoid overlap across slices
+    index_offset = 0
+
+    # Initialize a list to keep track of note ordering
+    note_onset_times = list()
 
     # Estimate the duration from the array of times
     _times = np.append(times, times[-1] + tools.estimate_hop_length(times))
@@ -1118,7 +1090,7 @@ def get_note_contour_grouping_by_index(jam, times):
             # Extract the time, pitch and note index
             time = pitch.time
             freq = pitch.value['frequency']
-            note_idx = pitch.value['index']
+            note_idx = pitch.value['index'] + index_offset
 
             if freq != 0 and pitch.value['voiced']:
                 # Convert frequency from Hertz to MIDI
@@ -1135,11 +1107,9 @@ def get_note_contour_grouping_by_index(jam, times):
                 # Determine to which index the observation time corresponds
                 frame_idx = np.argmin(np.abs(_times - time))
 
-                #print(f'Note Idx : {note_idx} | Time : {time} | Frame Idx : {frame_idx} | Freq : {freq}')
-
-                if note_idx in stacked_grouping[slc]:
+                if note_idx in grouping:
                     # Obtain a pointer to the preexisting tracked contour
-                    tracked_contour = stacked_grouping[slc][note_idx][0]
+                    tracked_contour = grouping[note_idx][0]
                     # Determine the expected frame index based on what has already been tracked
                     expected_frame_idx = tracked_contour.onset_idx + \
                                          len(tracked_contour.pitch_observations)
@@ -1153,9 +1123,24 @@ def get_note_contour_grouping_by_index(jam, times):
                         tracked_contour.append_observation(freq)
                 else:
                     # Create an entry for the new pitch contour
-                    stacked_grouping[slc][note_idx] = [PitchContour(freq, frame_idx)]
+                    grouping[note_idx] = [PitchContour(freq, frame_idx)]
 
-    return stacked_grouping
+        # Extract the onset times of the notes within this slice
+        slice_onset_times = [note.time for note in note_data_slices[slc]]
+
+        # Update the list of onset times
+        note_onset_times += slice_onset_times
+
+        # Increment the note index offset by the amount of notes added
+        index_offset += len(slice_onset_times)
+
+    # Sort the onset times of notes across all slices
+    note_sorting_idcs = np.argsort(np.argsort(note_onset_times))
+
+    # Update the dictionary keys to reflect the sorting
+    grouping = dict(sorted(zip(note_sorting_idcs, grouping.values())))
+
+    return grouping
 
 
 def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=True):
