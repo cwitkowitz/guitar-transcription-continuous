@@ -1,10 +1,11 @@
 # Author: Frank Cwitkowitz <fcwitkow@ur.rochester.edu>
 
 # My imports
-#from tabcnn_variants import TabCNNLogisticContinuous as TabCNN
+from tabcnn_variants import TabCNNLogisticContinuous as TabCNN
+from fretnet import FretNet
 from GuitarSet import GuitarSetPlus as GuitarSet
-from amt_tools.models import TabCNN
-from amt_tools.features import CQT
+#from amt_tools.models import TabCNN
+from amt_tools.features import CQT, STFT
 
 from amt_tools.train import train
 from amt_tools.transcribe import ComboEstimator, \
@@ -32,6 +33,7 @@ from torch.utils.data import DataLoader
 from sacred import Experiment
 
 import torch
+import time
 import os
 
 torch.multiprocessing.set_start_method('spawn', force=True)
@@ -61,7 +63,7 @@ def config():
     checkpoints = 25
 
     # Number of samples to gather for a batch
-    batch_size = 30
+    batch_size = 5
 
     # The initial learning rate
     learning_rate = 1.0
@@ -79,9 +81,9 @@ def config():
     # The random seed for this experiment
     seed = 0
 
-    # Create the root directory for the experiment to hold train/transcribe/evaluate materials
-    root_dir = os.path.join('..', 'generated', 'experiments', EX_NAME)
-    #root_dir = os.path.join(tools.DEFAULT_EXPERIMENTS_DIR, EX_NAME)
+    # Create the root directory for the experiment files
+    #root_dir = os.path.join('..', 'generated', 'experiments', EX_NAME)
+    root_dir = os.path.join(os.getenv('VH_OUTPUTS_DIR'), EX_NAME)
     os.makedirs(root_dir, exist_ok=True)
 
     # Add a file storage observer for the log directory
@@ -96,15 +98,17 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
     profile = tools.GuitarProfile()
 
     # Processing parameters
-    dim_in = 192
+    #dim_in = 192
+    dim_in = 2048
     model_complexity = 1
     semitone_width = 1.0
+    augment = True
 
     # Create the cqt data processing module
-    data_proc = CQT(sample_rate=sample_rate,
-                    hop_length=hop_length,
-                    n_bins=dim_in,
-                    bins_per_octave=24)
+    #data_proc = CQT(sample_rate=sample_rate, hop_length=hop_length, n_bins=dim_in, bins_per_octave=24)
+    data_proc = STFT(sample_rate=sample_rate, hop_length=hop_length, n_fft=dim_in)
+
+    dim_in = dim_in // 2 + 1
 
     # Initialize the estimation pipeline
     validation_estimator = ComboEstimator([
@@ -145,6 +149,12 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                            #TablaturePitchListEvaluator(pitch_tolerances=tols,
                                            #                            results_key=f'string-{tools.KEY_PITCHLIST}')])
 
+    # Build the path to GuitarSet on the Valohai server
+    gset_base_dir = os.path.join(os.getenv('VH_INPUTS_DIR'),
+                                 'data', 'frank-internship',
+                                 'active', 'GuitarSet')
+    #gset_base_dir = None
+
     # Keep all cached data/features here
     gset_cache = os.path.join('..', 'generated', 'data')
     gset_cache_train = os.path.join(gset_cache, 'train') # No extras
@@ -176,7 +186,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
             print('Loading training partition...')
 
             # Create a dataset corresponding to the training partition
-            gset_train = GuitarSet(base_dir=None,
+            gset_train = GuitarSet(base_dir=gset_base_dir,
                                    splits=train_splits,
                                    hop_length=hop_length,
                                    sample_rate=sample_rate,
@@ -185,20 +195,20 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                                    profile=profile,
                                    save_loc=gset_cache_train,
                                    semitone_width=semitone_width,
-                                   augment=False,
+                                   augment=augment,
                                    evaluation_extras=False)
 
             # Create a PyTorch data loader for the dataset
             train_loader = DataLoader(dataset=gset_train,
                                       batch_size=batch_size,
                                       shuffle=True,
-                                      num_workers=0,
+                                      num_workers=4 * int(augment),
                                       drop_last=True)
 
             print(f'Loading testing partition (player {test_splits[0]})...')
 
             # Create a dataset corresponding to the testing partition
-            gset_test = GuitarSet(base_dir=None,
+            gset_test = GuitarSet(base_dir=gset_base_dir,
                                   splits=test_splits,
                                   hop_length=hop_length,
                                   sample_rate=sample_rate,
@@ -214,7 +224,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                 print(f'Loading validation partition (player {val_splits[0]})...')
 
                 # Create a dataset corresponding to the validation partition
-                gset_val = GuitarSet(base_dir=None,
+                gset_val = GuitarSet(base_dir=gset_base_dir,
                                      splits=val_splits,
                                      hop_length=hop_length,
                                      sample_rate=sample_rate,
@@ -230,20 +240,20 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                 gset_val = gset_test
 
             # Initialize a new instance of the model
-            tabcnn = TabCNN(dim_in=dim_in,
+            tabcnn = FretNet(dim_in=dim_in,
                             profile=profile,
                             in_channels=data_proc.get_num_channels(),
                             model_complexity=model_complexity,
-                            #lmbda=10,
-                            #semitone_width=semitone_width,
-                            #gamma=10,
+                            lmbda=10,
+                            semitone_width=semitone_width,
+                            gamma=1,
                             device=gpu_id)
             tabcnn.change_device()
             tabcnn.train()
 
             # Initialize a new optimizer for the model parameters
-            #optimizer = torch.optim.Adam(tabcnn.parameters(), lr=5E-4)
-            optimizer = torch.optim.Adadelta(tabcnn.parameters(), learning_rate)
+            optimizer = torch.optim.Adam(tabcnn.parameters(), lr=5E-4)
+            #optimizer = torch.optim.Adadelta(tabcnn.parameters(), learning_rate)
 
             print('Training model...')
 
@@ -286,7 +296,11 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
         ex.log_scalar('Overall Results', average_results(results), 0)
 
     finally: # TODO - the following is for Valohai, remove
-        import time
-        #print('Waiting 2 minutes to allow files to finish updating...')
-        #time.sleep(120) # wait 2 minutes to avoid zipping before files update
-        #tools.zip_and_save(root_dir, os.path.join(os.path.dirname(root_dir), EX_NAME + '.zip'))
+        # Wait 1 minute to avoid zipping before files finish updating
+        print('Waiting 1 minute to allow files to finish updating...')
+        # Pause execution for 1 minute
+        #time.sleep(60)
+        # Construct a path to save all generated materials
+        #zip_path = os.path.join(os.path.dirname(root_dir), EX_NAME + '.zip')
+        # Save all experiment files as a single .zip file
+        #tools.zip_and_save(root_dir, zip_path)
