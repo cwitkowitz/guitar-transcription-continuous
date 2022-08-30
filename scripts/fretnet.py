@@ -10,11 +10,12 @@ import amt_tools.tools as tools
 import constants
 
 # Regular imports
-from copy import deepcopy
 from torch import nn
 
-import torch
 import math
+
+# TODO - add onset head in as another logistic layer (maybe with string inhibition)
+# TODO - don't model silence activation in tablature head?
 
 
 class FretNet(TabCNNLogisticContinuous):
@@ -61,16 +62,13 @@ class FretNet(TabCNNLogisticContinuous):
         dpx = 0.10
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels, nf1, ks1, padding=pd1),
+            nn.Conv2d(self.in_channels, nf1, ks1, padding=pd1),
             nn.BatchNorm2d(nf1),
             nn.ReLU(),
             nn.Conv2d(nf1, nf1, ks1, padding=pd1),
             nn.BatchNorm2d(nf1),
             nn.ReLU(),
         )
-
-        self.residual_weights = nn.init.kaiming_uniform_(
-            nn.Parameter(torch.empty(nf1, 1, 1)), a=math.sqrt(5))
 
         self.conv2 = nn.Sequential(
             nn.Conv2d(nf1, nf2, ks2, padding=pd2),
@@ -79,7 +77,7 @@ class FretNet(TabCNNLogisticContinuous):
             nn.Conv2d(nf2, nf2, ks2, padding=pd2),
             nn.BatchNorm2d(nf2),
             nn.ReLU(),
-            nn.MaxPool2d(rd2, padding=pd2),
+            nn.MaxPool2d(rd2),# padding=pd2),
             nn.Dropout(dp2)
         )
 
@@ -90,7 +88,7 @@ class FretNet(TabCNNLogisticContinuous):
             nn.Conv2d(nf3, nf3, ks3, padding=pd3),
             nn.BatchNorm2d(nf3),
             nn.ReLU(),
-            nn.MaxPool2d(rd3, padding=pd3),
+            nn.MaxPool2d(rd3),# padding=pd3),
             nn.Dropout(dp3)
         )
 
@@ -110,6 +108,7 @@ class FretNet(TabCNNLogisticContinuous):
 
         self.tablature_head = nn.Sequential(
             nn.Linear(features_dim_in, features_dim_int),
+            nn.ReLU(),
             nn.Dropout(dpx),
             self.tablature_layer
         )
@@ -120,6 +119,7 @@ class FretNet(TabCNNLogisticContinuous):
 
         self.relative_head = nn.Sequential(
             nn.Linear(features_dim_in, features_dim_int),
+            nn.ReLU(),
             nn.Dropout(dpx),
             self.relative_layer
         )
@@ -149,11 +149,10 @@ class FretNet(TabCNNLogisticContinuous):
         # so that each windowed group of frames is treated as one
         # independent sample. This is not done during pre-processing
         # in order to maintain consistency with the notion of batch size
-        feats = feats.reshape(-1, 1, self.dim_in, self.frame_width)
+        feats = feats.reshape(-1, self.in_channels, self.dim_in, self.frame_width)
 
         # Obtain the feature embeddings from the model
-        embeddings = self.conv3(self.conv2(self.conv1(feats) +
-                                           self.residual_weights * feats))
+        embeddings = self.conv3(self.conv2(self.conv1(feats)))
 
         # Flatten spatial features into one embedding
         embeddings = embeddings.flatten(1)

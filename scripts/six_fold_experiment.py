@@ -5,7 +5,7 @@ from tabcnn_variants import TabCNNLogisticContinuous as TabCNN
 from fretnet import FretNet
 from GuitarSet import GuitarSetPlus as GuitarSet
 #from amt_tools.models import TabCNN
-from amt_tools.features import CQT, STFT
+from amt_tools.features import CQT, STFT, HCQT
 
 from amt_tools.train import train
 from amt_tools.transcribe import ComboEstimator, \
@@ -32,17 +32,18 @@ from sacred.observers import FileStorageObserver
 from torch.utils.data import DataLoader
 from sacred import Experiment
 
+import librosa
 import torch
 import time
 import os
 
 torch.multiprocessing.set_start_method('spawn', force=True)
 
-EX_NAME = '_'.join([TabCNN.model_name(),
+EX_NAME = '_'.join([FretNet.model_name(),
                     GuitarSet.dataset_name(),
-                    CQT.features_name()])
+                    HCQT.features_name()])
 
-ex = Experiment('TabCNN (Continuous) w/ CQT on GuitarSet w/ 6-fold Cross Validation')
+ex = Experiment('FretNet w/ HCQT on GuitarSet w/ 6-fold Cross Validation')
 
 
 @ex.config
@@ -63,7 +64,7 @@ def config():
     checkpoints = 25
 
     # Number of samples to gather for a batch
-    batch_size = 5
+    batch_size = 30
 
     # The initial learning rate
     learning_rate = 1.0
@@ -95,20 +96,26 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                      batch_size, learning_rate, gpu_id, reset_data, validation_split,
                      seed, root_dir):
     # Initialize the default guitar profile
-    profile = tools.GuitarProfile()
+    profile = tools.GuitarProfile(num_frets=19)
 
     # Processing parameters
-    #dim_in = 192
-    dim_in = 2048
     model_complexity = 1
     semitone_width = 1.0
     augment = True
 
-    # Create the cqt data processing module
-    #data_proc = CQT(sample_rate=sample_rate, hop_length=hop_length, n_bins=dim_in, bins_per_octave=24)
-    data_proc = STFT(sample_rate=sample_rate, hop_length=hop_length, n_fft=dim_in)
-
-    dim_in = dim_in // 2 + 1
+    # Initialize a CQT feature extraction module
+    # spanning 8 octaves w/ 2 bins per semitone
+    #data_proc = CQT(sample_rate=sample_rate, hop_length=hop_length, n_bins=192, bins_per_octave=24)
+    # Initialize a standard STFT feature extraction module
+    #data_proc = STFT(sample_rate=sample_rate, hop_length=hop_length, n_fft=2048)
+    # Initialize an HCQT feature extraction module comprising
+    # the first five harmonics and a sub-harmonic, where each
+    # harmonic transform spans 4 octaves w/ 3 bins per semitone
+    data_proc = HCQT(sample_rate=sample_rate,
+                     hop_length=hop_length,
+                     fmin=librosa.note_to_hz('E2'),
+                     harmonics=[0.5, 1, 2, 3, 4, 5],
+                     n_bins=144, bins_per_octave=36)
 
     # Initialize the estimation pipeline
     validation_estimator = ComboEstimator([
@@ -240,7 +247,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                 gset_val = gset_test
 
             # Initialize a new instance of the model
-            tabcnn = FretNet(dim_in=dim_in,
+            tabcnn = FretNet(dim_in=data_proc.get_feature_size(),
                             profile=profile,
                             in_channels=data_proc.get_num_channels(),
                             model_complexity=model_complexity,
@@ -299,8 +306,8 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
         # Wait 1 minute to avoid zipping before files finish updating
         print('Waiting 1 minute to allow files to finish updating...')
         # Pause execution for 1 minute
-        #time.sleep(60)
+        time.sleep(60)
         # Construct a path to save all generated materials
-        #zip_path = os.path.join(os.path.dirname(root_dir), EX_NAME + '.zip')
+        zip_path = os.path.join(os.path.dirname(root_dir), EX_NAME + '.zip')
         # Save all experiment files as a single .zip file
-        #tools.zip_and_save(root_dir, zip_path)
+        tools.zip_and_save(root_dir, zip_path)
