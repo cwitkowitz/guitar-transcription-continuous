@@ -172,7 +172,7 @@ if __name__ == '__main__':
                                store_data=False)
 
     # Construct a path to the base directory for saving visualizations
-    save_dir = os.path.join('..', 'generated', 'visualization', 'matching')
+    save_dir = os.path.join('../..', 'generated', 'visualization', 'matching')
     os.makedirs(save_dir, exist_ok=True)
 
     # Use this line to only visualize data for specific tracks

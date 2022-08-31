@@ -2,8 +2,9 @@
 
 # My imports
 from guitar_transcription_inhibition.models import LogisticTablatureEstimator
-from amt_tools.models import TranscriptionModel, LogisticBank
-from tabcnn_variants import TabCNNLogisticContinuous, CBernoulliBank
+from amt_tools.models import TranscriptionModel
+from tabcnn_variants import TabCNNLogisticContinuous
+from continuous_layers import CBernoulliBank
 
 import amt_tools.tools as tools
 

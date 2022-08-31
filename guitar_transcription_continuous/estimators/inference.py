@@ -9,7 +9,6 @@ import constants
 import utils
 
 # Regular imports
-import os
 
 
 class StackedPitchListWrapper(_StackedPitchListWrapper):

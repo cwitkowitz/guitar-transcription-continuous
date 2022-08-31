@@ -163,7 +163,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
     #gset_base_dir = None
 
     # Keep all cached data/features here
-    gset_cache = os.path.join('..', 'generated', 'data')
+    gset_cache = os.path.join('', 'generated', 'data')
     gset_cache_train = os.path.join(gset_cache, 'train') # No extras
     gset_cache_val = os.path.join(gset_cache, 'val') # Includes extras
 
@@ -253,7 +253,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
                             model_complexity=model_complexity,
                             lmbda=10,
                             semitone_width=semitone_width,
-                            gamma=1,
+                            gamma=10,
                             device=gpu_id)
             tabcnn.change_device()
             tabcnn.train()
