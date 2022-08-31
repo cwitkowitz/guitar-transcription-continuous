@@ -1,12 +1,12 @@
 # Author: Frank Cwitkowitz <fcwitkow@ur.rochester.edu>
 
 # My imports
+from guitar_transcription_continuous.utils import get_note_contour_grouping_by_cluster
+
 from amt_tools.datasets import GuitarSet
 from amt_tools.features import CQT
 
 import amt_tools.tools as tools
-
-import utils
 
 # Regular imports
 import matplotlib.pyplot as plt
@@ -223,9 +223,7 @@ if __name__ == '__main__':
         all_contours = tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)
 
         # Obtain the contour grouping for all notes at once
-        grouping = utils.get_note_contour_grouping_by_cluster(all_notes,
-                                                              all_contours,
-                                                              **kwargs)
+        grouping = get_note_contour_grouping_by_cluster(all_notes, all_contours, **kwargs)
 
         # Initialize a new figure for the associations
         fig = tools.initialize_figure(interactive=False, figsize=(20, 5))
