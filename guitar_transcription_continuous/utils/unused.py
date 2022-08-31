@@ -12,7 +12,6 @@ __all__ = [
     'get_note_contour_grouping_by_index',
     'get_note_contour_grouping_by_interval',
     'get_rotarized_relative_multi_pitch',
-    'fill_empties',
     'pitch_list_to_relative_multi_pitch',
     'stacked_pitch_list_to_stacked_relative_multi_pitch'
 ]
@@ -306,31 +305,6 @@ def get_rotarized_relative_multi_pitch(relative_multi_pitch, adjusted_multi_pitc
     relative_multi_pitch = np.swapaxes(relative_multi_pitch, -1, -2)
 
     return relative_multi_pitch
-
-
-def fill_empties(pitch_list):
-    """
-    Replace empty pitch observations across frames with null (zero) observations.
-    Generally, a pitch list should not contain null observations, but it is useful
-    to have them in some situations.
-
-    Parameters
-    ----------
-    pitch_list : list of ndarray (N x [...])
-      Frame-level observations detailing active pitches
-      N - number of frames
-
-    Returns
-    ----------
-    pitch_list : list of ndarray (N x [...])
-      Frame-level observations detailing active pitches
-      N - number of frames
-    """
-
-    # Add a null frequency to empty observations
-    pitch_list = [p if len(p) else np.array([0.]) for p in pitch_list]
-
-    return pitch_list
 
 
 def pitch_list_to_relative_multi_pitch(pitch_list, profile):
