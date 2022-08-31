@@ -9,6 +9,7 @@ import guitar_transcription_continuous.utils as utils
 import amt_tools.tools as tools
 
 # Regular imports
+import numpy as np
 
 
 class StackedPitchListWrapper(_StackedPitchListWrapper):
@@ -81,6 +82,7 @@ class PitchListWrapper(StackedPitchListWrapper):
     Wrapper for converting continuous multi pitch activation maps to a pitch list.
 
     TODO - eventually, this should replace the parent class altogether
+         - could this not just extend StackedPitchListWrapper above?
     """
 
     def estimate(self, raw_output):
