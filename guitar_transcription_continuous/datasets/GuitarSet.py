@@ -3,10 +3,10 @@
 # My imports
 from amt_tools.datasets import GuitarSet, TranscriptionDataset
 
-import amt_tools.tools as tools
+import guitar_transcription_continuous.constants as constants
+import guitar_transcription_continuous.utils as utils
 
-import constants
-import utils
+import amt_tools.tools as tools
 
 # Regular imports
 from copy import deepcopy

@@ -3,9 +3,9 @@ from guitar_transcription_inhibition.models import TabCNNLogistic
 from amt_tools.models import TabCNN, LogisticBank
 from continuous_layers import CBernoulliBank
 
-import amt_tools.tools as tools
+import guitar_transcription_continuous.constants as constants
 
-import constants
+import amt_tools.tools as tools
 
 # Regular imports
 import torch

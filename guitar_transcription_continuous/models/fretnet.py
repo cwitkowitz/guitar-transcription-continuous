@@ -6,9 +6,9 @@ from amt_tools.models import TranscriptionModel
 from tabcnn_variants import TabCNNLogisticContinuous
 from continuous_layers import CBernoulliBank
 
-import amt_tools.tools as tools
+import guitar_transcription_continuous.constants as constants
 
-import constants
+import amt_tools.tools as tools
 
 # Regular imports
 from torch import nn
