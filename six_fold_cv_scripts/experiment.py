@@ -1,11 +1,13 @@
 # Author: Frank Cwitkowitz <fcwitkow@ur.rochester.edu>
 
 # My imports
-from tabcnn_variants import TabCNNLogisticContinuous as TabCNN
-from fretnet import FretNet
-from GuitarSet import GuitarSetPlus as GuitarSet
-#from amt_tools.models import TabCNN
+from guitar_transcription_continuous.models import TabCNNLogisticContinuous, FretNet
+from guitar_transcription_continuous.datasets import GuitarSetPlus as GuitarSet
+from guitar_transcription_continuous.estimators import StackedPitchListTablatureWrapper
+from guitar_transcription_continuous.evaluators import *
+
 from amt_tools.features import CQT, STFT, HCQT
+from amt_tools.models import TabCNN
 
 from amt_tools.train import train
 from amt_tools.transcribe import ComboEstimator, \
@@ -13,7 +15,6 @@ from amt_tools.transcribe import ComboEstimator, \
                                  StackedOnsetsWrapper, \
                                  StackedOffsetsWrapper, \
                                  StackedNoteTranscriber
-from inference import StackedPitchListTablatureWrapper
 from amt_tools.evaluate import ComboEvaluator, \
                                LossWrapper, \
                                TablatureEvaluator, \
@@ -21,17 +22,17 @@ from amt_tools.evaluate import ComboEvaluator, \
                                validate, \
                                append_results, \
                                average_results
-from evaluators import *
+
+import guitar_transcription_continuous.constants as constants
 
 import amt_tools.tools as tools
-
-import constants
 
 # Regular imports
 from sacred.observers import FileStorageObserver
 from torch.utils.data import DataLoader
 from sacred import Experiment
 
+import numpy as np
 import librosa
 import torch
 import time
