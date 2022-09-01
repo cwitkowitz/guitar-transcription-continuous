@@ -1,9 +1,9 @@
 # My imports
 from guitar_transcription_inhibition.models import TabCNNLogistic
 from amt_tools.models import TabCNN, LogisticBank
-from continuous_layers import CBernoulliBank
+from .continuous_layers import CBernoulliBank
 
-import guitar_transcription_continuous.constants as constants
+import guitar_transcription_continuous.utils as utils
 
 import amt_tools.tools as tools
 
@@ -102,7 +102,7 @@ class TabCNNMultipitch(TabCNN):
             # Calculate the loss and add it to the total (note that loss is computed
             # w.r.t. the multi pitch adjusted to match the ground-truth pitch contours)
             total_loss += self.multipitch_layer.get_loss(multipitch_est,
-                                                         batch[constants.KEY_MULTIPITCH_ADJ])
+                                                         batch[utils.KEY_MULTIPITCH_ADJ])
 
         if total_loss:
             # Add the loss to the output dictionary
@@ -174,7 +174,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
 
         # Process the embeddings with both output layers
         output[tools.KEY_MULTIPITCH] = self.multipitch_layer(embeddings)
-        output[constants.KEY_MULTIPITCH_REL] = self.relative_layer(embeddings)
+        output[utils.KEY_MULTIPITCH_REL] = self.relative_layer(embeddings)
 
         return output
 
@@ -198,7 +198,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         output = super().post_proc(batch)
 
         # Obtain the relative pitch deviation estimates
-        relative_est = output[constants.KEY_MULTIPITCH_REL]
+        relative_est = output[utils.KEY_MULTIPITCH_REL]
 
         # Unpack the loss if it exists
         loss = tools.unpack_dict(output, tools.KEY_LOSS)
@@ -209,15 +209,15 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
             loss = {}
 
         # Check to see if ground-truth relative multipitch is available
-        if constants.KEY_MULTIPITCH_REL in batch.keys():
+        if utils.KEY_MULTIPITCH_REL in batch.keys():
             # Normalize the ground-truth relative multi pitch data (-1, 1)
-            normalized_relative_multi_pitch = batch[constants.KEY_MULTIPITCH_REL] / self.semitone_width
+            normalized_relative_multi_pitch = batch[utils.KEY_MULTIPITCH_REL] / self.semitone_width
             # Compress the relative multi pitch data to fit within sigmoid range (0, 1)
             compressed_relative_multi_pitch = (normalized_relative_multi_pitch + 1) / 2
             # Compute the loss for the relative pitch deviation
             relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_multi_pitch)
             # Add the relative pitch deviation loss to the tracked loss dictionary
-            loss[constants.KEY_LOSS_PITCH_REL] = relative_loss
+            loss[utils.KEY_LOSS_PITCH_REL] = relative_loss
             # Add the relative pitch deviation loss to the (scaled) total loss
             total_loss = (1 / self.gamma) * total_loss + relative_loss
 
@@ -231,7 +231,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
 
         # Finalize the estimates by re-scaling to the chosen semitone width
-        output[constants.KEY_MULTIPITCH_REL] = self.semitone_width * relative_est
+        output[utils.KEY_MULTIPITCH_REL] = self.semitone_width * relative_est
 
         return output
 
@@ -333,7 +333,7 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
 
         # Process the embeddings with both output layers
         output[tools.KEY_TABLATURE] = self.tablature_layer(embeddings).pop(tools.KEY_TABLATURE)
-        output[constants.KEY_TABLATURE_REL] = self.relative_layer(embeddings)
+        output[utils.KEY_TABLATURE_REL] = self.relative_layer(embeddings)
 
         return output
 
@@ -355,17 +355,17 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
 
         # Switch keys for original and adjusted ground-truth tablature
         # so tablature loss is computed w.r.t. the adjusted targets
-        switch_keys_dict(batch, tools.KEY_TABLATURE, constants.KEY_TABLATURE_ADJ)
+        switch_keys_dict(batch, tools.KEY_TABLATURE, utils.KEY_TABLATURE_ADJ)
 
         # Call the post-processing method of the tablature layer
         output = super().post_proc(batch)
 
         # Switch back the keys for proper evaluation of tablature
         # TODO - wouldn't need to be this complicated if batch could be deep-copied in this scope
-        switch_keys_dict(batch, tools.KEY_TABLATURE, constants.KEY_TABLATURE_ADJ)
+        switch_keys_dict(batch, tools.KEY_TABLATURE, utils.KEY_TABLATURE_ADJ)
 
         # Obtain the relative pitch deviation estimates
-        relative_est = output[constants.KEY_TABLATURE_REL]
+        relative_est = output[utils.KEY_TABLATURE_REL]
 
         # Unpack the loss if it exists
         loss = tools.unpack_dict(output, tools.KEY_LOSS)
@@ -376,15 +376,15 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
             loss = {}
 
         # Check to see if ground-truth relative tablature is available
-        if constants.KEY_TABLATURE_REL in batch.keys():
+        if utils.KEY_TABLATURE_REL in batch.keys():
             # Normalize the ground-truth relative tablature data (-1, 1)
-            normalized_relative_tablature = batch[constants.KEY_TABLATURE_REL] / self.semitone_width
+            normalized_relative_tablature = batch[utils.KEY_TABLATURE_REL] / self.semitone_width
             # Compress the relative tablature data to fit within sigmoid range (0, 1)
             compressed_relative_tablature = (normalized_relative_tablature + 1) / 2
             # Compute the loss for the relative pitch deviation
             relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_tablature)
             # Add the relative pitch deviation loss to the tracked loss dictionary
-            loss[constants.KEY_LOSS_TABS_REL] = relative_loss
+            loss[utils.KEY_LOSS_TABS_REL] = relative_loss
             # Add the relative pitch deviation loss to the (scaled) total loss
             total_loss = (1 / self.gamma) * total_loss + relative_loss
 
@@ -398,6 +398,6 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
         relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
 
         # Finalize the estimates by re-scaling to the chosen semitone width
-        output[constants.KEY_TABLATURE_REL] = self.semitone_width * relative_est
+        output[utils.KEY_TABLATURE_REL] = self.semitone_width * relative_est
 
         return output

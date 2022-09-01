@@ -3,7 +3,6 @@
 # My imports
 from amt_tools.datasets import GuitarSet, TranscriptionDataset
 
-import guitar_transcription_continuous.constants as constants
 import guitar_transcription_continuous.utils as utils
 
 import amt_tools.tools as tools
@@ -175,8 +174,8 @@ class GuitarSetPlus(GuitarSet):
             data.update({tools.KEY_FS : fs,
                          tools.KEY_AUDIO : audio,
                          tools.KEY_TABLATURE: tablature,
-                         constants.KEY_TABLATURE_ADJ : adjusted_multi_pitch,
-                         constants.KEY_TABLATURE_REL : relative_multi_pitch})
+                         utils.KEY_TABLATURE_ADJ : adjusted_multi_pitch,
+                         utils.KEY_TABLATURE_REL : relative_multi_pitch})
 
             if self.evaluation_extras:
                 # Add evaluation extras to the dictionary

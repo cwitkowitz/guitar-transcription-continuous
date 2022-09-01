@@ -3,10 +3,10 @@
 # My imports
 from guitar_transcription_inhibition.models import LogisticTablatureEstimator
 from amt_tools.models import TranscriptionModel
-from tabcnn_variants import TabCNNLogisticContinuous
-from continuous_layers import CBernoulliBank
+from .tabcnn_variants import TabCNNLogisticContinuous
+from .continuous_layers import CBernoulliBank
 
-import guitar_transcription_continuous.constants as constants
+import guitar_transcription_continuous.utils as utils
 
 import amt_tools.tools as tools
 
@@ -164,7 +164,7 @@ class FretNet(TabCNNLogisticContinuous):
 
         # Process the embeddings with all the output heads
         output[tools.KEY_TABLATURE] = self.tablature_head(embeddings).pop(tools.KEY_TABLATURE)
-        output[constants.KEY_TABLATURE_REL] = self.relative_head(embeddings)
+        output[utils.KEY_TABLATURE_REL] = self.relative_head(embeddings)
         #output[tools.KEY_ONSETS] = self.onsets_head(embeddings.clone().detach())
 
         return output

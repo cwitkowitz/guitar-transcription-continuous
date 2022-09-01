@@ -3,7 +3,6 @@
 # My imports
 from amt_tools.transcribe import StackedPitchListWrapper as _StackedPitchListWrapper
 
-import guitar_transcription_continuous.constants as constants
 import guitar_transcription_continuous.utils as utils
 
 import amt_tools.tools as tools
@@ -37,7 +36,7 @@ class StackedPitchListWrapper(_StackedPitchListWrapper):
                          save_dir=save_dir)
 
         # Default the key for unpacking relevant data
-        self.multi_pitch_rel_key = constants.KEY_MULTIPITCH_REL if multi_pitch_rel_key is None else multi_pitch_rel_key
+        self.multi_pitch_rel_key = utils.KEY_MULTIPITCH_REL if multi_pitch_rel_key is None else multi_pitch_rel_key
 
     def estimate(self, raw_output):
         """

@@ -23,7 +23,7 @@ from amt_tools.evaluate import ComboEvaluator, \
                                append_results, \
                                average_results
 
-import guitar_transcription_continuous.constants as constants
+import guitar_transcription_continuous.utils as utils
 
 import amt_tools.tools as tools
 
@@ -93,9 +93,9 @@ def config():
 
 
 @ex.automain
-def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints,
-                     batch_size, learning_rate, gpu_id, reset_data, validation_split,
-                     seed, root_dir):
+def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints,
+                      batch_size, learning_rate, gpu_id, reset_data, validation_split,
+                      seed, root_dir):
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
 
@@ -131,7 +131,7 @@ def tabcnn_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoint
         # Continuous tablature arrays -> stacked pitch list
         StackedPitchListTablatureWrapper(profile=profile,
                                          multi_pitch_key=tools.KEY_TABLATURE,
-                                         multi_pitch_rel_key=constants.KEY_TABLATURE_REL)])
+                                         multi_pitch_rel_key=utils.KEY_TABLATURE_REL)])
 
     # Fractions of semitone to use for tolerances when evaluating pitch lists
     tols = np.array([2, 4, 8, 16], dtype=float) ** -1
