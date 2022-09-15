@@ -8,7 +8,6 @@ from guitar_transcription_continuous.evaluators import *
 from amt_tools.features import CQT, HCQT
 from amt_tools.models import TabCNN
 
-from amt_tools.train import train
 from amt_tools.transcribe import ComboEstimator, \
                                  TablatureWrapper, \
                                  StackedOnsetsWrapper, \
@@ -21,6 +20,7 @@ from amt_tools.evaluate import ComboEvaluator, \
                                validate, \
                                append_results, \
                                average_results
+from amt_tools.train import train
 
 import guitar_transcription_continuous.utils as utils
 import amt_tools.tools as tools
@@ -64,17 +64,17 @@ def config():
     # Number of samples to gather for a batch
     batch_size = 30
 
-    # The initial learning rate
+    # The fixed or initial learning rate
     learning_rate = 5E-4
 
     # The id of the gpu to use, if available
     gpu_id = 0
 
-    # Flag to re-acquire ground-truth data and re-calculate-features
-    # This is useful if testing out different parameters
+    # Flag to re-acquire ground-truth data and re-calculate
+    # features (useful if testing out different parameters)
     reset_data = False
 
-    # Flag to use one split for validation
+    # Flag to set aside one split for validation
     validation_split = True
 
     # Whether to perform data augmentation (pitch shifting) during training
@@ -84,10 +84,10 @@ def config():
     semitone_radius = 1.0
 
     # Multiplier for inhibition loss if applicable
-    lmbda = 10
+    lmbda = 1
 
     # Inverse scaling multiplier for discrete tablature / ihibition loss if applicable
-    gamma = 10
+    gamma = 1
 
     # The random seed for this experiment
     seed = 0
@@ -115,10 +115,10 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
 
-    # Initialize a CQT feature extraction module
+    # Create a CQT feature extraction module
     # spanning 8 octaves w/ 2 bins per semitone
     #data_proc = CQT(sample_rate=sample_rate, hop_length=hop_length, n_bins=192, bins_per_octave=24)
-    # Initialize an HCQT feature extraction module comprising
+    # Create an HCQT feature extraction module comprising
     # the first five harmonics and a sub-harmonic, where each
     # harmonic transform spans 4 octaves w/ 3 bins per semitone
     data_proc = HCQT(sample_rate=sample_rate,
@@ -142,31 +142,36 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                          multi_pitch_key=tools.KEY_TABLATURE,
                                          multi_pitch_rel_key=utils.KEY_TABLATURE_REL)])
 
-    # Fractions of semitone to use for tolerances when evaluating pitch lists
-    tols = [1/2, 1/4, 1/8, 1/16]
+    # Define tolerances to use when evaluating pitch lists
+    tols = [1/2, 1/4, 1/8, 1/16] # semitones
 
-    # Initialize the evaluation pipeline
+    # Initialize the evaluation pipeline - ( Loss,
     validation_evaluator = ComboEvaluator([LossWrapper(),
+                                           # Onsets/Offsets,
                                            OnsetsEvaluator(),
                                            OffsetsEvaluator(),
+                                           # Multi Pitch,
                                            MultipitchEvaluator(),
+                                           # String-Level Onsets/Offsets,
                                            TablatureOnsetEvaluator(profile=profile,
                                                                    results_key=f'string-{tools.KEY_ONSETS}'),
                                            TablatureOffsetEvaluator(profile=profile,
                                                                     results_key=f'string-{tools.KEY_OFFSETS}'),
+                                           # Tablature (String-Level Multi Pitch),
                                            TablatureEvaluator(profile=profile),
                                            SoftmaxAccuracy(),
+                                           # Notes
                                            NoteEvaluator(results_key=tools.KEY_NOTE_ON),
                                            NoteEvaluator(offset_ratio=0.2,
                                                          results_key=tools.KEY_NOTE_OFF),
+                                           # String-Level Notes
                                            TablatureNoteEvaluator(results_key=f'string-{tools.KEY_NOTE_ON}'),
                                            TablatureNoteEvaluator(offset_ratio=0.2,
                                                                   results_key=f'string-{tools.KEY_NOTE_OFF}'),
-                                           PitchListEvaluator(pitch_tolerances=tols),])
-                                           #TablaturePitchListEvaluator(pitch_tolerances=tols,
-                                           #                            results_key=f'string-{tools.KEY_PITCHLIST}')])
+                                           # Continuous Pitch
+                                           PitchListEvaluator(pitch_tolerances=tols)])
 
-    # Build the path to GuitarSet on the Valohai server
+    # Build the path to GuitarSet
     if file_layout == 2:
         gset_base_dir = os.path.join(os.getenv('VH_INPUTS_DIR'),
                                      'data', 'frank-internship',
@@ -178,36 +183,37 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
 
     # Keep all cached data/features here
     if file_layout == 1:
-        gset_base_dir = os.path.join('/', 'storageNVME', 'frank')
+        gset_cache = os.path.join('/', 'storageNVME', 'frank')
     else:
         gset_cache = os.path.join('..', 'generated', 'data')
     gset_cache_train = os.path.join(gset_cache, 'train') # No extras
     gset_cache_val = os.path.join(gset_cache, 'val') # Includes extras
 
-    # Get a list of the GuitarSet splits
-    splits = GuitarSet.available_splits()
-
     try:
-        # Initialize an empty dictionary to hold the average results across fold
+        # Initialize an empty dictionary to hold the average results across folds
         results = dict()
 
-        # Perform each fold of cross-validation
+        # Perform six-fold cross-validation
         for k in range(6):
-            # Seed everything with the same seed
-            tools.seed_everything(seed)
-
             print('--------------------')
             print(f'Fold {k}:')
 
+            # Seed everything with the same seed
+            tools.seed_everything(seed)
+
+            # Set validation patterns for logging during training
+            validation_evaluator.set_patterns(['loss', 'pr', 're', 'f1', 'tdr', 'acc'])
+
             # Allocate training/testing splits
-            train_splits = splits.copy()
+            train_splits = GuitarSet.available_splits()
             test_splits = [train_splits.pop(k)]
 
             if validation_split:
                 # Allocate validation split
                 val_splits = [train_splits.pop(k - 1)]
 
-            print('Loading training partition...')
+            if not augment_data:
+                print('Loading training partition...')
 
             # Create a dataset corresponding to the training partition
             gset_train = GuitarSet(base_dir=gset_base_dir,
@@ -263,61 +269,58 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                      semitone_radius=semitone_radius,
                                      evaluation_extras=True)
             else:
-                # Validate on the test set
+                # Perform validation on the testing partition
                 gset_val = gset_test
 
+            print('Initializing model...')
+
             # Initialize a new instance of the model
-            tabcnn = FretNet(dim_in=data_proc.get_feature_size(),
-                            profile=profile,
-                            in_channels=data_proc.get_num_channels(),
-                            lmbda=lmbda,
-                            semitone_radius=semitone_radius,
-                            gamma=gamma,
-                            device=gpu_id)
-            tabcnn.change_device()
-            tabcnn.train()
+            fretnet = FretNet(dim_in=data_proc.get_feature_size(),
+                              profile=profile,
+                              in_channels=data_proc.get_num_channels(),
+                              lmbda=lmbda,
+                              semitone_radius=semitone_radius,
+                              gamma=gamma,
+                              device=gpu_id)
+            fretnet.change_device()
+            fretnet.train()
 
             # Initialize a new optimizer for the model parameters
-            optimizer = torch.optim.Adam(tabcnn.parameters(), lr=learning_rate)
+            optimizer = torch.optim.Adam(fretnet.parameters(), lr=learning_rate)
 
             print('Training model...')
 
-            # Create a log directory for the training experiment
-            model_dir = os.path.join(root_dir, 'models', 'fold-' + str(k))
-
-            # Set validation patterns for training
-            validation_evaluator.set_patterns(['loss', 'pr', 're', 'f1', 'tdr', 'acc'])
-
             # Train the model
-            tabcnn = train(model=tabcnn,
-                           train_loader=train_loader,
-                           optimizer=optimizer,
-                           iterations=iterations,
-                           checkpoints=checkpoints,
-                           log_dir=model_dir,
-                           val_set=gset_val,
-                           estimator=validation_estimator,
-                           evaluator=validation_evaluator)
+            fretnet = train(model=fretnet,
+                            train_loader=train_loader,
+                            optimizer=optimizer,
+                            iterations=iterations,
+                            checkpoints=checkpoints,
+                            log_dir=os.path.join(root_dir, 'models', 'fold-' + str(k)),
+                            val_set=gset_val,
+                            estimator=validation_estimator,
+                            evaluator=validation_evaluator)
 
             print('Transcribing and evaluating test partition...')
 
-            # Add a save directory to the evaluators and reset the patterns
+            # Add a save directory to the evaluators
             validation_evaluator.set_save_dir(os.path.join(root_dir, 'results'))
+            # Reset the evaluation patterns to log everything
             validation_evaluator.set_patterns(None)
 
-            # Get the average results for the fold
-            fold_results = validate(tabcnn, gset_test, evaluator=validation_evaluator, estimator=validation_estimator)
+            # Compute the average results for the fold
+            fold_results = validate(fretnet, gset_test, evaluator=validation_evaluator, estimator=validation_estimator)
 
             # Add the results to the tracked fold results
             results = append_results(results, fold_results)
 
-            # Reset the results for the next fold
+            # Reset the evaluators for the next fold
             validation_evaluator.reset_results()
 
-            # Log the fold results for the fold in metrics.json
+            # Log the average results for the fold in metrics.json
             ex.log_scalar('Fold Results', fold_results, k)
 
-        # Log the average results for the fold in metrics.json
+        # Log the average results across all folds in metrics.json
         ex.log_scalar('Overall Results', average_results(results), 0)
 
     finally:
