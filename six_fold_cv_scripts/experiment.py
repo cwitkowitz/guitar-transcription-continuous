@@ -80,12 +80,19 @@ def config():
     # Flag to use one split for validation
     validation_split = True
 
+    # Switch to manage different file schema (0 - local | 1 - lab machine | 2 - valohai)
+    file_layout = 0
+
     # The random seed for this experiment
     seed = 0
 
     # Create the root directory for the experiment files
-    #root_dir = os.path.join('..', 'generated', 'experiments', EX_NAME)
-    root_dir = os.path.join(os.getenv('VH_OUTPUTS_DIR'), EX_NAME)
+    if file_layout == 2:
+        root_dir = os.path.join(os.getenv('VH_OUTPUTS_DIR'), EX_NAME)
+    elif file_layout == 1:
+        root_dir = os.path.join('/', 'storage', 'frank', 'continuous_experiments', EX_NAME)
+    else:
+        root_dir = os.path.join('..', 'generated', 'experiments', EX_NAME)
     os.makedirs(root_dir, exist_ok=True)
 
     # Add a file storage observer for the log directory
@@ -95,7 +102,7 @@ def config():
 @ex.automain
 def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints,
                       batch_size, learning_rate, gpu_id, reset_data, validation_split,
-                      seed, root_dir):
+                      file_layout, seed, root_dir):
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
 
@@ -158,13 +165,20 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                            #                            results_key=f'string-{tools.KEY_PITCHLIST}')])
 
     # Build the path to GuitarSet on the Valohai server
-    gset_base_dir = os.path.join(os.getenv('VH_INPUTS_DIR'),
-                                 'data', 'frank-internship',
-                                 'active', 'GuitarSet')
-    #gset_base_dir = None
+    if file_layout == 2:
+        gset_base_dir = os.path.join(os.getenv('VH_INPUTS_DIR'),
+                                     'data', 'frank-internship',
+                                     'active', 'GuitarSet')
+    elif file_layout == 1:
+        gset_base_dir = os.path.join('/', 'storage', 'frank')
+    else:
+        gset_base_dir = None
 
     # Keep all cached data/features here
-    gset_cache = os.path.join('', 'generated', 'data')
+    if file_layout == 1:
+        gset_base_dir = os.path.join('/', 'storageNVME', 'frank')
+    else:
+        gset_cache = os.path.join('..', 'generated', 'data')
     gset_cache_train = os.path.join(gset_cache, 'train') # No extras
     gset_cache_val = os.path.join(gset_cache, 'val') # Includes extras
 
