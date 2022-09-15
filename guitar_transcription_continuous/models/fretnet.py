@@ -25,14 +25,14 @@ class FretNet(TabCNNLogisticContinuous):
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1,
-                 semitone_width=0.5, gamma=1, lmbda=1, device='cpu'):
+                 semitone_radius=0.5, gamma=1, lmbda=1, device='cpu'):
         """
         TODO
         """
 
         TranscriptionModel.__init__(self, dim_in, profile, in_channels, model_complexity, 9, device)
 
-        self.semitone_width = semitone_width
+        self.semitone_radius = semitone_radius
         self.gamma = gamma
 
         # Initialize a flag to check whether to pad input features

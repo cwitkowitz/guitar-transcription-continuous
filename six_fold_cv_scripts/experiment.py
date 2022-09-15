@@ -5,8 +5,7 @@ from guitar_transcription_continuous.models import TabCNNLogisticContinuous, Fre
 from guitar_transcription_continuous.datasets import GuitarSetPlus as GuitarSet
 from guitar_transcription_continuous.estimators import StackedPitchListTablatureWrapper
 from guitar_transcription_continuous.evaluators import *
-
-from amt_tools.features import CQT, STFT, HCQT
+from amt_tools.features import CQT, HCQT
 from amt_tools.models import TabCNN
 
 from amt_tools.train import train
@@ -24,7 +23,6 @@ from amt_tools.evaluate import ComboEvaluator, \
                                average_results
 
 import guitar_transcription_continuous.utils as utils
-
 import amt_tools.tools as tools
 
 # Regular imports
@@ -32,7 +30,6 @@ from sacred.observers import FileStorageObserver
 from torch.utils.data import DataLoader
 from sacred import Experiment
 
-import numpy as np
 import librosa
 import torch
 import time
@@ -68,7 +65,7 @@ def config():
     batch_size = 30
 
     # The initial learning rate
-    learning_rate = 1.0
+    learning_rate = 5E-4
 
     # The id of the gpu to use, if available
     gpu_id = 0
@@ -80,11 +77,23 @@ def config():
     # Flag to use one split for validation
     validation_split = True
 
-    # Switch to manage different file schema (0 - local | 1 - lab machine | 2 - valohai)
-    file_layout = 0
+    # Whether to perform data augmentation (pitch shifting) during training
+    augment_data = False
+
+    # Amount of semitones in each direction modeled for each note
+    semitone_radius = 1.0
+
+    # Multiplier for inhibition loss if applicable
+    lmbda = 10
+
+    # Inverse scaling multiplier for discrete tablature / ihibition loss if applicable
+    gamma = 10
 
     # The random seed for this experiment
     seed = 0
+
+    # Switch to manage different file schema (0 - local | 1 - lab machine | 2 - valohai)
+    file_layout = 0
 
     # Create the root directory for the experiment files
     if file_layout == 2:
@@ -100,22 +109,15 @@ def config():
 
 
 @ex.automain
-def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints,
-                      batch_size, learning_rate, gpu_id, reset_data, validation_split,
-                      file_layout, seed, root_dir):
+def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints, batch_size, learning_rate,
+                      gpu_id, reset_data, validation_split, augment_data, semitone_radius, lmbda, gamma, seed,
+                      file_layout, root_dir):
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
-
-    # Processing parameters
-    model_complexity = 1
-    semitone_width = 1.0
-    augment = True
 
     # Initialize a CQT feature extraction module
     # spanning 8 octaves w/ 2 bins per semitone
     #data_proc = CQT(sample_rate=sample_rate, hop_length=hop_length, n_bins=192, bins_per_octave=24)
-    # Initialize a standard STFT feature extraction module
-    #data_proc = STFT(sample_rate=sample_rate, hop_length=hop_length, n_fft=2048)
     # Initialize an HCQT feature extraction module comprising
     # the first five harmonics and a sub-harmonic, where each
     # harmonic transform spans 4 octaves w/ 3 bins per semitone
@@ -141,7 +143,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                          multi_pitch_rel_key=utils.KEY_TABLATURE_REL)])
 
     # Fractions of semitone to use for tolerances when evaluating pitch lists
-    tols = np.array([2, 4, 8, 16], dtype=float) ** -1
+    tols = [1/2, 1/4, 1/8, 1/16]
 
     # Initialize the evaluation pipeline
     validation_evaluator = ComboEvaluator([LossWrapper(),
@@ -185,7 +187,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
     # Get a list of the GuitarSet splits
     splits = GuitarSet.available_splits()
 
-    try: # TODO - for Valohai, remove try/catch
+    try:
         # Initialize an empty dictionary to hold the average results across fold
         results = dict()
 
@@ -215,16 +217,17 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                    num_frames=num_frames,
                                    data_proc=data_proc,
                                    profile=profile,
+                                   reset_data=(reset_data and k == 0),
                                    save_loc=gset_cache_train,
-                                   semitone_width=semitone_width,
-                                   augment=augment,
+                                   semitone_radius=semitone_radius,
+                                   augment=augment_data,
                                    evaluation_extras=False)
 
             # Create a PyTorch data loader for the dataset
             train_loader = DataLoader(dataset=gset_train,
                                       batch_size=batch_size,
                                       shuffle=True,
-                                      num_workers=4 * int(augment),
+                                      num_workers=4 * int(augment_data),
                                       drop_last=True)
 
             print(f'Loading testing partition (player {test_splits[0]})...')
@@ -237,9 +240,10 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                   num_frames=None,
                                   data_proc=data_proc,
                                   profile=profile,
+                                  reset_data=(reset_data and k == 0),
                                   store_data=(not validation_split),
                                   save_loc=gset_cache_val,
-                                  semitone_width=semitone_width,
+                                  semitone_radius=semitone_radius,
                                   evaluation_extras=True)
 
             if validation_split:
@@ -253,9 +257,10 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                      num_frames=None,
                                      data_proc=data_proc,
                                      profile=profile,
+                                     reset_data=(reset_data and k == 0),
                                      store_data=True,
                                      save_loc=gset_cache_val,
-                                     semitone_width=semitone_width,
+                                     semitone_radius=semitone_radius,
                                      evaluation_extras=True)
             else:
                 # Validate on the test set
@@ -265,17 +270,15 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
             tabcnn = FretNet(dim_in=data_proc.get_feature_size(),
                             profile=profile,
                             in_channels=data_proc.get_num_channels(),
-                            model_complexity=model_complexity,
-                            lmbda=10,
-                            semitone_width=semitone_width,
-                            gamma=10,
+                            lmbda=lmbda,
+                            semitone_radius=semitone_radius,
+                            gamma=gamma,
                             device=gpu_id)
             tabcnn.change_device()
             tabcnn.train()
 
             # Initialize a new optimizer for the model parameters
-            optimizer = torch.optim.Adam(tabcnn.parameters(), lr=5E-4)
-            #optimizer = torch.optim.Adadelta(tabcnn.parameters(), learning_rate)
+            optimizer = torch.optim.Adam(tabcnn.parameters(), lr=learning_rate)
 
             print('Training model...')
 
@@ -317,7 +320,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
         # Log the average results for the fold in metrics.json
         ex.log_scalar('Overall Results', average_results(results), 0)
 
-    finally: # TODO - the following is for Valohai, remove
+    finally:
         # Wait 1 minute to avoid zipping before files finish updating
         print('Waiting 1 minute to allow files to finish updating...')
         # Pause execution for 1 minute

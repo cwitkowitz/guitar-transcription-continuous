@@ -17,7 +17,7 @@ __all__ = [
 ]
 
 
-def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, stream_tolerance=1.0,
+def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_radius=0.5, stream_tolerance=1.0,
                                          minimum_contour_duration=None, attempt_corrections=False,
                                          suppress_warnings=True):
     """
@@ -39,7 +39,7 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
       _times : ndarray (N)
         Time in seconds of beginning of each frame
       (N - number of pitch observations (frames))
-    semitone_width : float
+    semitone_radius : float
       Amount of deviation from nominal pitch supported
     stream_tolerance : float
       Pitch difference tolerated across adjacent frames of a single contour
@@ -148,7 +148,7 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_width=0.5, 
     # the contour and the average pitch of the note for each grouping
     magnitude_differences = np.abs(pitches[assignment] - contour_region_averages)
 
-    for i in np.where(magnitude_differences > semitone_width)[0]:
+    for i in np.where(magnitude_differences > semitone_radius)[0]:
         if not suppress_warnings:
             # Average pitches of a contour and note match is too large
             warnings.warn('Average pitch of grouped contour and note differ ' +

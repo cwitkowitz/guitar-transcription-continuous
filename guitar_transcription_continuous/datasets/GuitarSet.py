@@ -23,7 +23,7 @@ class GuitarSetPlus(GuitarSet):
     """
 
     # TODO - can I remove clutter by making other dataset signatures like this?
-    def __init__(self, semitone_width=0.5, augment=False, evaluation_extras=False, **kwargs):
+    def __init__(self, semitone_radius=0.5, augment=False, evaluation_extras=False, **kwargs):
         """
         Initialize the dataset variant.
 
@@ -31,7 +31,7 @@ class GuitarSetPlus(GuitarSet):
         ----------
         See GuitarSet class for others...
 
-        semitone_width : float
+        semitone_radius : float
           Scaling factor for relative pitch estimates
         augment : bool
           Whether to apply pitch shifting data augmentation
@@ -39,7 +39,7 @@ class GuitarSetPlus(GuitarSet):
           Whether to compute/load extraneous data (for evaluation)
         """
 
-        self.semitone_width = semitone_width
+        self.semitone_radius = semitone_radius
         self.augment = augment
         self.evaluation_extras = evaluation_extras
 
@@ -151,7 +151,7 @@ class GuitarSetPlus(GuitarSet):
                                                                         stacked_pitch_list,
                                                                         self.profile,
                                                                         times=times,
-                                                                        semitone_width=self.semitone_width, # semitones
+                                                                        semitone_radius=self.semitone_radius,
                                                                         stream_tolerance=0.4, # semitones
                                                                         minimum_contour_duration=18, # milliseconds
                                                                         attempt_corrections=True,
@@ -159,8 +159,8 @@ class GuitarSetPlus(GuitarSet):
 
             # Clip the deviations at the supported semitone width
             stacked_relative_multi_pitch = np.clip(stacked_relative_multi_pitch,
-                                                   a_min=-self.semitone_width,
-                                                   a_max=self.semitone_width)
+                                                   a_min=-self.semitone_radius,
+                                                   a_max=self.semitone_radius)
 
             # Obtain a logistic representation of the multi pitch ground-truth adjusted to the pitch contours
             adjusted_multi_pitch = \

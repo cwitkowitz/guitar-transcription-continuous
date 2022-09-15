@@ -120,7 +120,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
     Implements TabCNN for continuous multipitch estimation.
     """
 
-    def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_width=0.5, gamma=1, device='cpu'):
+    def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_radius=0.5, gamma=1, device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
@@ -129,7 +129,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         ----------
         See TabCNN class for others...
 
-        semitone_width : float
+        semitone_radius : float
           Scaling factor for relative pitch estimates
         gamma : float
           Inverse scaling multiplier for the discrete multipitch loss
@@ -137,7 +137,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
 
         super().__init__(dim_in, profile, in_channels, model_complexity, device)
 
-        self.semitone_width = semitone_width
+        self.semitone_radius = semitone_radius
         self.gamma = gamma
 
         # Create another output layer to estimate relative pitch deviation
@@ -211,7 +211,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         # Check to see if ground-truth relative multipitch is available
         if utils.KEY_MULTIPITCH_REL in batch.keys():
             # Normalize the ground-truth relative multi pitch data (-1, 1)
-            normalized_relative_multi_pitch = batch[utils.KEY_MULTIPITCH_REL] / self.semitone_width
+            normalized_relative_multi_pitch = batch[utils.KEY_MULTIPITCH_REL] / self.semitone_radius
             # Compress the relative multi pitch data to fit within sigmoid range (0, 1)
             compressed_relative_multi_pitch = (normalized_relative_multi_pitch + 1) / 2
             # Compute the loss for the relative pitch deviation
@@ -231,7 +231,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
 
         # Finalize the estimates by re-scaling to the chosen semitone width
-        output[utils.KEY_MULTIPITCH_REL] = self.semitone_width * relative_est
+        output[utils.KEY_MULTIPITCH_REL] = self.semitone_radius * relative_est
 
         return output
 
@@ -276,7 +276,7 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1,
-                 semitone_width=0.5, gamma=1, lmbda=1, device='cpu'):
+                 semitone_radius=0.5, gamma=1, lmbda=1, device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
@@ -285,7 +285,7 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
         ----------
         See TabCNN/LogisticTablatureEstimator class for others...
 
-        semitone_width : float
+        semitone_radius : float
           Scaling factor for relative pitch estimates
         gamma : float
           Inverse scaling multiplier for the discrete tablature loss
@@ -293,7 +293,7 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
 
         super().__init__(dim_in, profile, in_channels, model_complexity, None, True, lmbda, device)
 
-        self.semitone_width = semitone_width
+        self.semitone_radius = semitone_radius
         self.gamma = gamma
 
         # Extract tablature parameters
@@ -378,7 +378,7 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
         # Check to see if ground-truth relative tablature is available
         if utils.KEY_TABLATURE_REL in batch.keys():
             # Normalize the ground-truth relative tablature data (-1, 1)
-            normalized_relative_tablature = batch[utils.KEY_TABLATURE_REL] / self.semitone_width
+            normalized_relative_tablature = batch[utils.KEY_TABLATURE_REL] / self.semitone_radius
             # Compress the relative tablature data to fit within sigmoid range (0, 1)
             compressed_relative_tablature = (normalized_relative_tablature + 1) / 2
             # Compute the loss for the relative pitch deviation
@@ -398,6 +398,6 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
         relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
 
         # Finalize the estimates by re-scaling to the chosen semitone width
-        output[utils.KEY_TABLATURE_REL] = self.semitone_width * relative_est
+        output[utils.KEY_TABLATURE_REL] = self.semitone_radius * relative_est
 
         return output

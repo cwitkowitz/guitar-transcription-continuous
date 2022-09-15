@@ -178,7 +178,7 @@ if __name__ == '__main__':
     # Use this line to only visualize data for specific tracks
     # tablature_data.tracks = ['<track_name>']
 
-    kwargs = {'semitone_width' : 1.0, # semitones
+    kwargs = {'semitone_radius' : 1.0, # semitones
               'stream_tolerance' : 0.4, # semitones
               'minimum_contour_duration' : 18, # milliseconds
               'attempt_corrections' : True,
