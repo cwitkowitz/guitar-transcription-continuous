@@ -101,7 +101,7 @@ class GuitarSetPlus(GuitarSet):
             stacked_notes = tools.extract_stacked_notes_jams(jams_data)
 
             # Sample a valid semitone shift according to the pre-existing notes in the track
-            semitone_shift = sample_valid_pitch_shift(stacked_notes, self.profile, 5, self.rng)
+            semitone_shift = sample_valid_pitch_shift(stacked_notes, self.profile, 5, None, self.rng)
 
         # Update the track name to reflect any augmentation
         track_ = track + f'_{semitone_shift}' if semitone_shift else track
@@ -218,7 +218,7 @@ class GuitarSetPlus(GuitarSet):
         return data
 
 
-def sample_valid_pitch_shift(stacked_notes, profile, steepness=5, rng=None):
+def sample_valid_pitch_shift(stacked_notes, profile, steepness=5, max_pitch_shift=None, rng=None):
     """
     Sample a random pitch shift that does not violate the instrument profile.
 
@@ -230,6 +230,8 @@ def sample_valid_pitch_shift(stacked_notes, profile, steepness=5, rng=None):
       Instrument profile detailing experimental setup
     steepness : float
       Scaling factor (exponential) for relative weights before normalization
+    max_pitch_shift : int or None (Optional)
+      Maximum allowable pitch shift in either direction
     rng : NumPy RandomState
       Random number generator to use for augmentation
 
@@ -260,6 +262,11 @@ def sample_valid_pitch_shift(stacked_notes, profile, steepness=5, rng=None):
     # Determine the maximum capo shift in both directions
     max_shift_down = max(0, np.min(unused_frets_left))
     max_shift_up = max(0, np.min(unused_frets_right))
+
+    if max_pitch_shift is not None:
+        # Clip the boundaries at the maximum allowable shift
+        max_shift_down = min(max_shift_down, max_pitch_shift)
+        max_shift_up = min(max_shift_up, max_pitch_shift)
 
     # Construct an array of valid choices for the semitone shift
     valid_range = np.arange(-max_shift_down, max_shift_up + 1)
