@@ -275,8 +275,8 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
     Implements TabCNN w/ logistic formulation for continuous tablature estimation.
     """
 
-    def __init__(self, dim_in, profile, in_channels, model_complexity=1,
-                 semitone_radius=0.5, gamma=1, lmbda=1, device='cpu'):
+    def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_radius=0.5,
+                 gamma=1, matrix_path=None, silence_activations=False, lmbda=1, device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
@@ -291,7 +291,8 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
           Inverse scaling multiplier for the discrete tablature loss
         """
 
-        super().__init__(dim_in, profile, in_channels, model_complexity, None, True, lmbda, device)
+        super().__init__(dim_in, profile, in_channels, model_complexity,
+                         matrix_path, silence_activations, lmbda, device)
 
         self.semitone_radius = semitone_radius
         self.gamma = gamma
@@ -357,7 +358,7 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
         # so tablature loss is computed w.r.t. the adjusted targets
         switch_keys_dict(batch, tools.KEY_TABLATURE, utils.KEY_TABLATURE_ADJ)
 
-        # Call the post-processing method of the tablature layer
+        # Call the post-processing method of the parent
         output = super().post_proc(batch)
 
         # Switch back the keys for proper evaluation of tablature

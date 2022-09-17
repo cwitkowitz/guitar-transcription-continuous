@@ -83,11 +83,26 @@ def config():
     # Amount of semitones in each direction modeled for each note
     semitone_radius = 1.0
 
+    # Flag to use rotarized pitch deviations for ground-truth
+    rotarize_deviations = False
+
+    # Flag to use MSE loss for continuous output layers instead of Continuous Bernoulli loss
+    l2_layer = False
+
     # Multiplier for inhibition loss if applicable
     lmbda = 1
 
+    # Path to inhibition matrix if applicable
+    matrix_path = None
+
+    # Flag to include an activation for silence in applicable output layers
+    silence_activations = False
+
     # Inverse scaling multiplier for discrete tablature / ihibition loss if applicable
     gamma = 1
+
+    # Flag to use HCQT features insead of CQT
+    harmonic_dimension = True
 
     # The random seed for this experiment
     seed = 0
@@ -110,22 +125,25 @@ def config():
 
 @ex.automain
 def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints, batch_size, learning_rate,
-                      gpu_id, reset_data, validation_split, augment_data, semitone_radius, lmbda, gamma, seed,
+                      gpu_id, reset_data, validation_split, augment_data, semitone_radius, rotarize_deviations,
+                      l2_layer, lmbda, matrix_path, silence_activations, gamma, harmonic_dimension, seed,
                       file_layout, root_dir):
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
 
-    # Create a CQT feature extraction module
-    # spanning 8 octaves w/ 2 bins per semitone
-    #data_proc = CQT(sample_rate=sample_rate, hop_length=hop_length, n_bins=192, bins_per_octave=24)
-    # Create an HCQT feature extraction module comprising
-    # the first five harmonics and a sub-harmonic, where each
-    # harmonic transform spans 4 octaves w/ 3 bins per semitone
-    data_proc = HCQT(sample_rate=sample_rate,
-                     hop_length=hop_length,
-                     fmin=librosa.note_to_hz('E2'),
-                     harmonics=[0.5, 1, 2, 3, 4, 5],
-                     n_bins=144, bins_per_octave=36)
+    if harmonic_dimension:
+        # Create an HCQT feature extraction module comprising
+        # the first five harmonics and a sub-harmonic, where each
+        # harmonic transform spans 4 octaves w/ 3 bins per semitone
+        data_proc = HCQT(sample_rate=sample_rate,
+                         hop_length=hop_length,
+                         fmin=librosa.note_to_hz('E2'),
+                         harmonics=[0.5, 1, 2, 3, 4, 5],
+                         n_bins=144, bins_per_octave=36)
+    else:
+        # Create a CQT feature extraction module
+        # spanning 8 octaves w/ 2 bins per semitone
+        data_proc = CQT(sample_rate=sample_rate, hop_length=hop_length, n_bins=192, bins_per_octave=24)
 
     # Initialize the estimation pipeline
     validation_estimator = ComboEstimator([
@@ -226,7 +244,9 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                    reset_data=(reset_data and k == 0),
                                    save_loc=gset_cache_train,
                                    semitone_radius=semitone_radius,
+                                   rotarize_deviations=rotarize_deviations,
                                    augment=augment_data,
+                                   silence_activations=silence_activations,
                                    evaluation_extras=False)
 
             # Create a PyTorch data loader for the dataset
@@ -250,6 +270,8 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                   store_data=(not validation_split),
                                   save_loc=gset_cache_val,
                                   semitone_radius=semitone_radius,
+                                  rotarize_deviations=rotarize_deviations,
+                                  silence_activations=silence_activations,
                                   evaluation_extras=True)
 
             if validation_split:
@@ -267,6 +289,8 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                      store_data=True,
                                      save_loc=gset_cache_val,
                                      semitone_radius=semitone_radius,
+                                     rotarize_deviations=rotarize_deviations,
+                                     silence_activations=silence_activations,
                                      evaluation_extras=True)
             else:
                 # Perform validation on the testing partition
@@ -279,8 +303,11 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                               profile=profile,
                               in_channels=data_proc.get_num_channels(),
                               lmbda=lmbda,
+                              matrix_path=matrix_path,
+                              silence_activations=silence_activations,
                               semitone_radius=semitone_radius,
                               gamma=gamma,
+                              l2_layer=l2_layer,
                               device=gpu_id)
             fretnet.change_device()
             fretnet.train()

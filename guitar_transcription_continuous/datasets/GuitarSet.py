@@ -23,7 +23,8 @@ class GuitarSetPlus(GuitarSet):
     """
 
     # TODO - can I remove clutter by making other dataset signatures like this?
-    def __init__(self, semitone_radius=0.5, augment=False, evaluation_extras=False, **kwargs):
+    def __init__(self, semitone_radius=0.5, rotarize_deviations=False, augment=False,
+                 silence_activations=False, evaluation_extras=False, **kwargs):
         """
         Initialize the dataset variant.
 
@@ -33,14 +34,21 @@ class GuitarSetPlus(GuitarSet):
 
         semitone_radius : float
           Scaling factor for relative pitch estimates
+        rotarize_deviations : bool
+          Whether non-active relative pitch values should
+          be non-zero, revolving around the active pitch
         augment : bool
           Whether to apply pitch shifting data augmentation
+        silence_activations : bool
+          Whether silent strings are explicitly modeled as activations
         evaluation_extras : bool
           Whether to compute/load extraneous data (for evaluation)
         """
 
         self.semitone_radius = semitone_radius
+        self.rotarize_deviations = rotarize_deviations
         self.augment = augment
+        self.silence_activations = silence_activations
         self.evaluation_extras = evaluation_extras
 
         # Determine if the base directory argument was provided
@@ -157,6 +165,11 @@ class GuitarSetPlus(GuitarSet):
                                                                         attempt_corrections=True,
                                                                         suppress_warnings=True)
 
+            if self.rotarize_deviations:
+                # Obtain a rotary representation of the relative pitch deviations
+                stacked_relative_multi_pitch = utils.get_rotarized_relative_multi_pitch(stacked_relative_multi_pitch,
+                                                                                        stacked_adjusted_multi_pitch)
+
             # Clip the deviations at the supported semitone width
             stacked_relative_multi_pitch = np.clip(stacked_relative_multi_pitch,
                                                    a_min=-self.semitone_radius,
@@ -164,7 +177,8 @@ class GuitarSetPlus(GuitarSet):
 
             # Obtain a logistic representation of the multi pitch ground-truth adjusted to the pitch contours
             adjusted_multi_pitch = \
-                tools.stacked_multi_pitch_to_logistic(stacked_adjusted_multi_pitch, self.profile, True)
+                tools.stacked_multi_pitch_to_logistic(stacked_adjusted_multi_pitch,
+                                                      self.profile, self.silence_activations)
 
             # Obtain a logistic representation of the corresponding relative pitch deviations
             relative_multi_pitch = \

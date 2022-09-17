@@ -2,9 +2,9 @@
 
 # My imports
 from guitar_transcription_inhibition.models import LogisticTablatureEstimator
-from amt_tools.models import TranscriptionModel
+from amt_tools.models import TranscriptionModel, LogisticBank
 from .tabcnn_variants import TabCNNLogisticContinuous
-from .continuous_layers import CBernoulliBank
+from .continuous_layers import CBernoulliBank, L2LogisticBank
 
 import guitar_transcription_continuous.utils as utils
 
@@ -15,8 +15,7 @@ from torch import nn
 
 import math
 
-# TODO - add onset head in as another logistic layer (maybe with string inhibition)
-# TODO - don't model silence activation in tablature head?
+# TODO - add in onset head with switch?
 
 
 class FretNet(TabCNNLogisticContinuous):
@@ -24,8 +23,9 @@ class FretNet(TabCNNLogisticContinuous):
     TODO
     """
 
-    def __init__(self, dim_in, profile, in_channels, model_complexity=1,
-                 semitone_radius=0.5, gamma=1, lmbda=1, device='cpu'):
+    def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_radius=0.5,
+                 gamma=1, l2_layer=False, matrix_path=None, silence_activations=False, lmbda=1,
+                 device='cpu'):
         """
         TODO
         """
@@ -102,8 +102,8 @@ class FretNet(TabCNNLogisticContinuous):
 
         self.tablature_layer = LogisticTablatureEstimator(dim_in=features_dim_int,
                                                           profile=profile,
-                                                          matrix_path=None,
-                                                          silence_activations=True,
+                                                          matrix_path=matrix_path,
+                                                          silence_activations=silence_activations,
                                                           lmbda=lmbda,
                                                           device=device)
 
@@ -116,7 +116,10 @@ class FretNet(TabCNNLogisticContinuous):
 
         dim_out = self.profile.get_num_dofs() * self.profile.num_pitches
 
-        self.relative_layer = CBernoulliBank(features_dim_int, dim_out)
+        if l2_layer:
+            self.relative_layer = L2LogisticBank(features_dim_int, dim_out)
+        else:
+            self.relative_layer = CBernoulliBank(features_dim_int, dim_out)
 
         self.relative_head = nn.Sequential(
             nn.Linear(features_dim_in, features_dim_int),
@@ -124,16 +127,6 @@ class FretNet(TabCNNLogisticContinuous):
             nn.Dropout(dpx),
             self.relative_layer
         )
-
-        """
-        self.onsets_layer = LogisticBank(features_dim_int, dim_out)
-
-        self.onsets_head = nn.Sequential(
-            nn.Linear(features_dim_in, features_dim_int),
-            nn.Dropout(dpx),
-            self.onsets_layer
-        )
-        """
 
     def forward(self, feats):
         """
@@ -165,6 +158,5 @@ class FretNet(TabCNNLogisticContinuous):
         # Process the embeddings with all the output heads
         output[tools.KEY_TABLATURE] = self.tablature_head(embeddings).pop(tools.KEY_TABLATURE)
         output[utils.KEY_TABLATURE_REL] = self.relative_head(embeddings)
-        #output[tools.KEY_ONSETS] = self.onsets_head(embeddings.clone().detach())
 
         return output
