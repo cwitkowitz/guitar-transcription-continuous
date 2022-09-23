@@ -197,7 +197,7 @@ for k in range(6):
     # Add the results to the tracked fold results
     results = append_results(results, fold_results)
 
-with open(output_path, 'a') as fp:
+with open(output_path, 'a') as json_file:
     # Add some other fields to the data before writing
     json_data = {'overall': {'time': str(datetime.datetime.now()),
                              'results': average_results(results)}}
