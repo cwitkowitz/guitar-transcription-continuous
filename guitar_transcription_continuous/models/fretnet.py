@@ -24,8 +24,8 @@ class FretNet(TabCNNLogisticContinuous):
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_radius=0.5,
-                 gamma=1, l2_layer=False, matrix_path=None, silence_activations=False, lmbda=1,
-                 device='cpu'):
+                 gamma=1, l2_layer=True, matrix_path=None, silence_activations=False, lmbda=1,
+                 estimate_onsets=True, device='cpu'):
         """
         Initialize all components of the model.
 
@@ -35,12 +35,16 @@ class FretNet(TabCNNLogisticContinuous):
 
         l2_layer : bool
           Switch to choose between MSE vs. Continuous Bernoulli for relative pitch layer
+        estimate_onsets : bool
+          Switch for including an additional head to estimate onsets
         """
 
         TranscriptionModel.__init__(self, dim_in, profile, in_channels, model_complexity, 9, device)
 
         self.semitone_radius = semitone_radius
         self.gamma = gamma
+        self.l2_layer = l2_layer
+        self.estimate_onsets = estimate_onsets
 
         # Initialize a flag to check whether to pad input features
         self.online = False
@@ -149,6 +153,18 @@ class FretNet(TabCNNLogisticContinuous):
             self.relative_layer
         )
 
+        if self.estimate_onsets:
+            # Initialize an output layer for onset detection
+            self.onsets_layer = LogisticBank(features_dim_int, dim_out)
+
+            # Initialize the onset detection head
+            self.onsets_head = nn.Sequential(
+                nn.Linear(features_dim_in, features_dim_int),
+                nn.ReLU(),
+                nn.Dropout(dpx),
+                self.onsets_layer
+            )
+
     def forward(self, feats):
         """
         Perform the main processing steps for FretNet.
@@ -165,7 +181,7 @@ class FretNet(TabCNNLogisticContinuous):
 
         Returns
         ----------
-        output : dict w/ tablature/relative Tensors (both B x T x O)
+        output : dict w/ tablature/relative and potentially onsets Tensors (all B x T x O)
           Dictionary containing continuous tablature output
           B - batch size,
           T - number of time steps (frames),
@@ -194,5 +210,63 @@ class FretNet(TabCNNLogisticContinuous):
         # Process the embeddings with all the output heads
         output[tools.KEY_TABLATURE] = self.tablature_head(embeddings).pop(tools.KEY_TABLATURE)
         output[utils.KEY_TABLATURE_REL] = self.relative_head(embeddings)
+
+        if self.estimate_onsets:
+            output[tools.KEY_ONSETS] = self.onsets_head(embeddings.clone().detach())
+
+        return output
+
+    def post_proc(self, batch):
+        """
+        Calculate onsets loss and finalize onset predictions.
+
+        Parameters
+        ----------
+        batch : dict
+          Dictionary including model output and potentially
+          ground-truth for a group of tracks
+
+        Returns
+        ----------
+        output : dict
+          Dictionary containing tablature, relative deviation, and potentially onsets/loss
+        """
+
+        # Call the post-processing method of the parent
+        output = super().post_proc(batch)
+
+        if self.estimate_onsets:
+            # Obtain the estimated onsets
+            onsets_est = output[tools.KEY_ONSETS]
+
+            # Unpack the loss if it exists
+            loss = tools.unpack_dict(output, tools.KEY_LOSS)
+            total_loss = 0 if loss is None else loss[tools.KEY_LOSS_TOTAL]
+
+            if loss is None:
+                # Create a new dictionary to hold the loss
+                loss = {}
+
+            # Check to see if ground-truth onsets are available
+            if tools.KEY_ONSETS in batch.keys():
+                # Extract the ground-truth onsets
+                onsets_ref = tools.stacked_multi_pitch_to_logistic(batch[tools.KEY_ONSETS], self.profile, False)
+                # Calculate the onsets loss term
+                onsets_loss = self.onsets_layer.get_loss(onsets_est, onsets_ref)
+                # Add the onsets loss to the tracked loss dictionary
+                loss[tools.KEY_LOSS_ONSETS] = onsets_loss
+                # Add the (potentially) scaled-down onsets loss to the total loss
+                total_loss += ((1 / self.gamma) ** int(not self.l2_layer)) * onsets_loss
+
+            # Determine if loss is being tracked
+            if total_loss:
+                # Add the loss to the output dictionary
+                loss[tools.KEY_LOSS_TOTAL] = total_loss
+                output[tools.KEY_LOSS] = loss
+
+            # Finalize the predicted onsets
+            onsets_est = self.onsets_layer.finalize_output(onsets_est, 0.5)
+            # Convert the onsets to stacked multi pitch format
+            output[tools.KEY_ONSETS] = tools.logistic_to_stacked_multi_pitch(onsets_est, self.profile, False)
 
         return output

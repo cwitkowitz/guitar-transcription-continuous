@@ -87,19 +87,22 @@ def config():
     rotarize_deviations = False
 
     # Flag to use MSE loss for continuous output layers instead of Continuous Bernoulli loss
-    l2_layer = False
+    l2_layer = True
 
     # Multiplier for inhibition loss if applicable
-    lmbda = 1
+    lmbda = 10
 
     # Path to inhibition matrix if applicable
     matrix_path = None
 
     # Flag to include an activation for silence in applicable output layers
-    silence_activations = False
+    silence_activations = True
 
     # Inverse scaling multiplier for discrete tablature / ihibition loss if applicable
-    gamma = 1
+    gamma = 10
+
+    # Flag to include an additional onset head in FretNet
+    estimate_onsets = True
 
     # Flag to use HCQT features insead of CQT
     harmonic_dimension = True
@@ -126,8 +129,8 @@ def config():
 @ex.automain
 def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints, batch_size, learning_rate,
                       gpu_id, reset_data, validation_split, augment_data, semitone_radius, rotarize_deviations,
-                      l2_layer, lmbda, matrix_path, silence_activations, gamma, harmonic_dimension, seed,
-                      file_layout, root_dir):
+                      l2_layer, lmbda, matrix_path, silence_activations, gamma, estimate_onsets, harmonic_dimension,
+                      seed, file_layout, root_dir):
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
 
@@ -149,8 +152,6 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
     validation_estimator = ComboEstimator([
         # Discrete tablature -> stacked multi pitch array
         TablatureWrapper(profile=profile),
-        # Stacked multi pitch array -> stacked onsets array
-        StackedOnsetsWrapper(profile=profile),
         # Stacked multi pitch array -> stacked offsets array
         StackedOffsetsWrapper(profile=profile),
         # Stacked multi pitch array -> stacked notes
@@ -159,6 +160,12 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
         StackedPitchListTablatureWrapper(profile=profile,
                                          multi_pitch_key=tools.KEY_TABLATURE,
                                          multi_pitch_rel_key=utils.KEY_TABLATURE_REL)])
+
+    if not estimate_onsets:
+        # Infer the onsets directly from the multi pitch data
+        validation_estimator.estimators += [
+            # Stacked multi pitch array -> stacked onsets array
+            StackedOnsetsWrapper(profile=profile)]
 
     # Define tolerances to use when evaluating pitch lists
     tols = [1/2, 1/4, 1/8, 1/16] # semitones
@@ -195,7 +202,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                      'data', 'frank-internship',
                                      'active', 'GuitarSet')
     elif file_layout == 1:
-        gset_base_dir = os.path.join('/', 'storage', 'frank')
+        gset_base_dir = os.path.join('/', 'storage', 'frank', 'GuitarSet')
     else:
         gset_base_dir = None
 
@@ -308,6 +315,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                               semitone_radius=semitone_radius,
                               gamma=gamma,
                               l2_layer=l2_layer,
+                              estimate_onsets=estimate_onsets,
                               device=gpu_id)
             fretnet.change_device()
             fretnet.train()

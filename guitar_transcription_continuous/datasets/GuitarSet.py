@@ -189,15 +189,15 @@ class GuitarSetPlus(GuitarSet):
                          tools.KEY_AUDIO : audio,
                          tools.KEY_TABLATURE: tablature,
                          utils.KEY_TABLATURE_ADJ : adjusted_multi_pitch,
-                         utils.KEY_TABLATURE_REL : relative_multi_pitch})
+                         utils.KEY_TABLATURE_REL : relative_multi_pitch,
+                         tools.KEY_ONSETS : stacked_onsets})
 
             if self.evaluation_extras:
                 # Add evaluation extras to the dictionary
-                data.update({tools.KEY_NOTES: stacked_notes,
-                             tools.KEY_ONSETS: stacked_onsets,
-                             tools.KEY_OFFSETS: stacked_offsets,
-                             tools.KEY_MULTIPITCH: stacked_multi_pitch,
-                             tools.KEY_PITCHLIST: stacked_pitch_list})
+                data.update({tools.KEY_NOTES : stacked_notes,
+                             tools.KEY_OFFSETS : stacked_offsets,
+                             tools.KEY_MULTIPITCH : stacked_multi_pitch,
+                             tools.KEY_PITCHLIST : stacked_pitch_list})
 
             if self.save_data:
                 # Get the appropriate path for saving the track data

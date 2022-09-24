@@ -1,7 +1,7 @@
 # My imports
 from guitar_transcription_inhibition.models import TabCNNLogistic
 from amt_tools.models import TabCNN, LogisticBank
-from .continuous_layers import CBernoulliBank
+from .continuous_layers import CBernoulliBank, L2LogisticBank
 
 import guitar_transcription_continuous.utils as utils
 
@@ -121,7 +121,8 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
     Implements TabCNN for continuous multipitch estimation.
     """
 
-    def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_radius=0.5, gamma=1, device='cpu'):
+    def __init__(self, dim_in, profile, in_channels, model_complexity=1,
+                 semitone_radius=0.5, gamma=1, l2_layer=True, device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
@@ -134,16 +135,25 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
           Scaling factor for relative pitch estimates
         gamma : float
           Inverse scaling multiplier for the discrete multipitch loss
+        l2_layer : bool
+          Switch to choose between MSE vs. Continuous Bernoulli for relative pitch layer
         """
 
         super().__init__(dim_in, profile, in_channels, model_complexity, device)
 
         self.semitone_radius = semitone_radius
         self.gamma = gamma
+        self.l2_layer = l2_layer
 
         # Create another output layer to estimate relative pitch deviation
-        self.relative_layer = CBernoulliBank(self.multipitch_layer.dim_in,
-                                             self.multipitch_layer.dim_out)
+        if l2_layer:
+            # Train continuous relative pitch layer with MSE loss
+            self.relative_layer = L2LogisticBank(self.multipitch_layer.dim_in,
+                                                 self.multipitch_layer.dim_out)
+        else:
+            # Train continuous relative pitch layer with Continuous Bernoulli loss
+            self.relative_layer = CBernoulliBank(self.multipitch_layer.dim_in,
+                                                 self.multipitch_layer.dim_out)
 
     def forward(self, feats):
         """
@@ -220,8 +230,10 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
             relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_multi_pitch)
             # Add the relative pitch deviation loss to the tracked loss dictionary
             loss[utils.KEY_LOSS_PITCH_REL] = relative_loss
-            # Add the relative pitch deviation loss to the (scaled) total loss
-            total_loss = (1 / self.gamma) * total_loss + relative_loss
+            # Scale down the current total loss if Continuous Bernoulli layer
+            total_loss /= (self.gamma ** int(not self.l2_layer))
+            # Add the scaled relative pitch deviation loss to the total loss
+            total_loss += (self.gamma ** int(self.l2_layer)) * relative_loss
 
         # Determine if loss is being tracked
         if total_loss:
@@ -278,7 +290,8 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_radius=0.5,
-                 gamma=1, matrix_path=None, silence_activations=False, lmbda=1, device='cpu'):
+                 gamma=1, l2_layer=True, matrix_path=None, silence_activations=False, lmbda=1,
+                 device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
@@ -291,6 +304,8 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
           Scaling factor for relative pitch estimates
         gamma : float
           Inverse scaling multiplier for the discrete tablature loss
+        l2_layer : bool
+          Switch to choose between MSE vs. Continuous Bernoulli for relative pitch layer
         """
 
         super().__init__(dim_in, profile, in_channels, model_complexity,
@@ -298,13 +313,18 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
 
         self.semitone_radius = semitone_radius
         self.gamma = gamma
+        self.l2_layer = l2_layer
 
-        # Extract tablature parameters
-        num_strings = self.profile.get_num_dofs()
-        num_pitches = self.profile.num_pitches
+        # Determine output dimensionality when not explicitly modeling silence
+        tablature_dim_out = self.profile.get_num_dofs() * self.profile.num_pitches
 
         # Create another output layer to estimate relative pitch deviation
-        self.relative_layer = CBernoulliBank(self.tablature_layer.dim_in, num_strings * num_pitches)
+        if l2_layer:
+            # Train continuous relative pitch layer with MSE loss
+            self.relative_layer = L2LogisticBank(self.tablature_layer.dim_in, tablature_dim_out)
+        else:
+            # Train continuous relative pitch layer with Continuous Bernoulli loss
+            self.relative_layer = CBernoulliBank(self.tablature_layer.dim_in, tablature_dim_out)
 
     def forward(self, feats):
         """
@@ -389,8 +409,10 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
             relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_tablature)
             # Add the relative pitch deviation loss to the tracked loss dictionary
             loss[utils.KEY_LOSS_TABS_REL] = relative_loss
-            # Add the relative pitch deviation loss to the (scaled) total loss
-            total_loss = (1 / self.gamma) * total_loss + relative_loss
+            # Scale down the current total loss if Continuous Bernoulli layer
+            total_loss /= (self.gamma ** int(not self.l2_layer))
+            # Add the scaled relative pitch deviation loss to the total loss
+            total_loss += (self.gamma ** int(self.l2_layer)) * relative_loss
 
         # Determine if loss is being tracked
         if total_loss:
