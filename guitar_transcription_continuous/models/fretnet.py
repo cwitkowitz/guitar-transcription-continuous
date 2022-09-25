@@ -24,7 +24,7 @@ class FretNet(TabCNNLogisticContinuous):
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_radius=0.5,
-                 gamma=1, l2_layer=True, matrix_path=None, silence_activations=False, lmbda=1,
+                 gamma=1, cont_layer=1, matrix_path=None, silence_activations=False, lmbda=1,
                  estimate_onsets=True, device='cpu'):
         """
         Initialize all components of the model.
@@ -33,8 +33,9 @@ class FretNet(TabCNNLogisticContinuous):
         ----------
         See TabCNNLogisticContinuous/LogisticTablatureEstimator class for others...
 
-        l2_layer : bool
-          Switch to choose between MSE vs. Continuous Bernoulli for relative pitch layer
+        cont_layer : bool
+          Switch to select type of continuous output layer for relative pitch prediction
+          (0 - Continuous Bernoulli | 1 - MSE | None - disable relative pitch prediction)
         estimate_onsets : bool
           Switch for including an additional head to estimate onsets
         """
@@ -43,7 +44,7 @@ class FretNet(TabCNNLogisticContinuous):
 
         self.semitone_radius = semitone_radius
         self.gamma = gamma
-        self.l2_layer = l2_layer
+        self.cont_layer = cont_layer
         self.estimate_onsets = estimate_onsets
 
         # Initialize a flag to check whether to pad input features
@@ -138,20 +139,22 @@ class FretNet(TabCNNLogisticContinuous):
         # Determine output dimensionality when not explicitly modeling silence
         dim_out = self.profile.get_num_dofs() * self.profile.num_pitches
 
-        if l2_layer:
-            # Train continuous relative pitch layer with MSE loss
-            self.relative_layer = L2LogisticBank(features_dim_int, dim_out)
-        else:
-            # Train continuous relative pitch layer with Continuous Bernoulli loss
-            self.relative_layer = CBernoulliBank(features_dim_int, dim_out)
+        if self.cont_layer is not None:
+            # Create another output layer to estimate relative pitch deviation
+            if self.cont_layer:
+                # Train continuous relative pitch layer with MSE loss
+                self.relative_layer = L2LogisticBank(features_dim_int, dim_out)
+            else:
+                # Train continuous relative pitch layer with Continuous Bernoulli loss
+                self.relative_layer = CBernoulliBank(features_dim_int, dim_out)
 
-        # Initialize the relative tablature estimation head
-        self.relative_head = nn.Sequential(
-            nn.Linear(features_dim_in, features_dim_int),
-            nn.ReLU(),
-            nn.Dropout(dpx),
-            self.relative_layer
-        )
+            # Initialize the relative tablature estimation head
+            self.relative_head = nn.Sequential(
+                nn.Linear(features_dim_in, features_dim_int),
+                nn.ReLU(),
+                nn.Dropout(dpx),
+                self.relative_layer
+            )
 
         if self.estimate_onsets:
             # Initialize an output layer for onset detection
@@ -207,11 +210,15 @@ class FretNet(TabCNNLogisticContinuous):
         # Restore proper batch dimension, unsqueezing sequence-frame axis
         embeddings = embeddings.view(batch_size, -1, embedding_size)
 
-        # Process the embeddings with all the output heads
+        # Process embeddings with discrete tablature head
         output[tools.KEY_TABLATURE] = self.tablature_head(embeddings).pop(tools.KEY_TABLATURE)
-        output[utils.KEY_TABLATURE_REL] = self.relative_head(embeddings)
+
+        if self.cont_layer is not None:
+            # Process embeddings with relative tablature head
+            output[utils.KEY_TABLATURE_REL] = self.relative_head(embeddings)
 
         if self.estimate_onsets:
+            # Process embeddings with onsets head
             output[tools.KEY_ONSETS] = self.onsets_head(embeddings.clone().detach())
 
         return output
@@ -256,7 +263,7 @@ class FretNet(TabCNNLogisticContinuous):
                 # Add the onsets loss to the tracked loss dictionary
                 loss[tools.KEY_LOSS_ONSETS] = onsets_loss
                 # Add the (potentially) scaled-down onsets loss to the total loss
-                total_loss += ((1 / self.gamma) ** int(not self.l2_layer)) * onsets_loss
+                total_loss += ((1 / self.gamma) ** int(self.cont_layer == 0)) * onsets_loss
 
             # Determine if loss is being tracked
             if total_loss:

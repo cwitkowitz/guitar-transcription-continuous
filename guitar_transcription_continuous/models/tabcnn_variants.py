@@ -122,7 +122,7 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1,
-                 semitone_radius=0.5, gamma=1, l2_layer=True, device='cpu'):
+                 semitone_radius=0.5, gamma=1, cont_layer=1, device='cpu'):
         """
         Initialize the model and include an additional output
         layer for the estimation of relative pitch deviation.
@@ -135,25 +135,27 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
           Scaling factor for relative pitch estimates
         gamma : float
           Inverse scaling multiplier for the discrete multipitch loss
-        l2_layer : bool
-          Switch to choose between MSE vs. Continuous Bernoulli for relative pitch layer
+        cont_layer : bool
+          Switch to select type of continuous output layer for relative pitch prediction
+          (0 - Continuous Bernoulli | 1 - MSE | None - disable relative pitch prediction)
         """
 
         super().__init__(dim_in, profile, in_channels, model_complexity, device)
 
         self.semitone_radius = semitone_radius
         self.gamma = gamma
-        self.l2_layer = l2_layer
+        self.cont_layer = cont_layer
 
-        # Create another output layer to estimate relative pitch deviation
-        if l2_layer:
-            # Train continuous relative pitch layer with MSE loss
-            self.relative_layer = L2LogisticBank(self.multipitch_layer.dim_in,
-                                                 self.multipitch_layer.dim_out)
-        else:
-            # Train continuous relative pitch layer with Continuous Bernoulli loss
-            self.relative_layer = CBernoulliBank(self.multipitch_layer.dim_in,
-                                                 self.multipitch_layer.dim_out)
+        if self.cont_layer is not None:
+            # Create another output layer to estimate relative pitch deviation
+            if cont_layer:
+                # Train continuous relative pitch layer with MSE loss
+                self.relative_layer = L2LogisticBank(self.multipitch_layer.dim_in,
+                                                     self.multipitch_layer.dim_out)
+            else:
+                # Train continuous relative pitch layer with Continuous Bernoulli loss
+                self.relative_layer = CBernoulliBank(self.multipitch_layer.dim_in,
+                                                     self.multipitch_layer.dim_out)
 
     def forward(self, feats):
         """
@@ -184,9 +186,12 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         # Extract the embeddings from the output dictionary (labeled as tablature)
         embeddings = output.pop(tools.KEY_TABLATURE)
 
-        # Process the embeddings with both output layers
+        # Process embeddings with discrete multipitch layer
         output[tools.KEY_MULTIPITCH] = self.multipitch_layer(embeddings)
-        output[utils.KEY_MULTIPITCH_REL] = self.relative_layer(embeddings)
+
+        if self.cont_layer is not None:
+            # Process embeddings with relative multipitch layer
+            output[utils.KEY_MULTIPITCH_REL] = self.relative_layer(embeddings)
 
         return output
 
@@ -209,43 +214,44 @@ class TabCNNContinuousMultipitch(TabCNNMultipitch):
         # Calculate multipitch loss
         output = super().post_proc(batch)
 
-        # Obtain the relative pitch deviation estimates
-        relative_est = output[utils.KEY_MULTIPITCH_REL]
+        if self.cont_layer is not None:
+            # Obtain the relative pitch deviation estimates
+            relative_est = output[utils.KEY_MULTIPITCH_REL]
 
-        # Unpack the loss if it exists
-        loss = tools.unpack_dict(output, tools.KEY_LOSS)
-        total_loss = 0 if loss is None else loss[tools.KEY_LOSS_TOTAL]
+            # Unpack the loss if it exists
+            loss = tools.unpack_dict(output, tools.KEY_LOSS)
+            total_loss = 0 if loss is None else loss[tools.KEY_LOSS_TOTAL]
 
-        if loss is None:
-            # Create a new dictionary to hold the loss
-            loss = {}
+            if loss is None:
+                # Create a new dictionary to hold the loss
+                loss = {}
 
-        # Check to see if ground-truth relative multipitch is available
-        if utils.KEY_MULTIPITCH_REL in batch.keys():
-            # Normalize the ground-truth relative multi pitch data (-1, 1)
-            normalized_relative_multi_pitch = batch[utils.KEY_MULTIPITCH_REL] / self.semitone_radius
-            # Compress the relative multi pitch data to fit within sigmoid range (0, 1)
-            compressed_relative_multi_pitch = (normalized_relative_multi_pitch + 1) / 2
-            # Compute the loss for the relative pitch deviation
-            relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_multi_pitch)
-            # Add the relative pitch deviation loss to the tracked loss dictionary
-            loss[utils.KEY_LOSS_PITCH_REL] = relative_loss
-            # Scale down the current total loss if Continuous Bernoulli layer
-            total_loss /= (self.gamma ** int(not self.l2_layer))
-            # Add the scaled relative pitch deviation loss to the total loss
-            total_loss += (self.gamma ** int(self.l2_layer)) * relative_loss
+            # Check to see if ground-truth relative multipitch is available
+            if utils.KEY_MULTIPITCH_REL in batch.keys():
+                # Normalize the ground-truth relative multi pitch data (-1, 1)
+                normalized_relative_multi_pitch = batch[utils.KEY_MULTIPITCH_REL] / self.semitone_radius
+                # Compress the relative multi pitch data to fit within sigmoid range (0, 1)
+                compressed_relative_multi_pitch = (normalized_relative_multi_pitch + 1) / 2
+                # Compute the loss for the relative pitch deviation
+                relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_multi_pitch)
+                # Add the relative pitch deviation loss to the tracked loss dictionary
+                loss[utils.KEY_LOSS_PITCH_REL] = relative_loss
+                # Scale down the current total loss if Continuous Bernoulli layer
+                total_loss /= (self.gamma ** int(not self.cont_layer))
+                # Add the scaled relative pitch deviation loss to the total loss
+                total_loss += (self.gamma ** int(self.cont_layer)) * relative_loss
 
-        # Determine if loss is being tracked
-        if total_loss:
-            # Add the loss to the output dictionary
-            loss[tools.KEY_LOSS_TOTAL] = total_loss
-            output[tools.KEY_LOSS] = loss
+            # Determine if loss is being tracked
+            if total_loss:
+                # Add the loss to the output dictionary
+                loss[tools.KEY_LOSS_TOTAL] = total_loss
+                output[tools.KEY_LOSS] = loss
 
-        # Normalize relative multi pitch estimates between (-1, 1)
-        relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
+            # Normalize relative multi pitch estimates between (-1, 1)
+            relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
 
-        # Finalize the estimates by re-scaling to the chosen semitone width
-        output[utils.KEY_MULTIPITCH_REL] = self.semitone_radius * relative_est
+            # Finalize the estimates by re-scaling to the chosen semitone width
+            output[utils.KEY_MULTIPITCH_REL] = self.semitone_radius * relative_est
 
         return output
 
@@ -290,7 +296,7 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
     """
 
     def __init__(self, dim_in, profile, in_channels, model_complexity=1, semitone_radius=0.5,
-                 gamma=1, l2_layer=True, matrix_path=None, silence_activations=False, lmbda=1,
+                 gamma=1, cont_layer=1, matrix_path=None, silence_activations=False, lmbda=1,
                  device='cpu'):
         """
         Initialize the model and include an additional output
@@ -304,8 +310,9 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
           Scaling factor for relative pitch estimates
         gamma : float
           Inverse scaling multiplier for the discrete tablature loss
-        l2_layer : bool
-          Switch to choose between MSE vs. Continuous Bernoulli for relative pitch layer
+        cont_layer : bool
+          Switch to select type of continuous output layer for relative pitch prediction
+          (0 - Continuous Bernoulli | 1 - MSE | None - disable relative pitch prediction)
         """
 
         super().__init__(dim_in, profile, in_channels, model_complexity,
@@ -313,18 +320,19 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
 
         self.semitone_radius = semitone_radius
         self.gamma = gamma
-        self.l2_layer = l2_layer
+        self.cont_layer = cont_layer
 
         # Determine output dimensionality when not explicitly modeling silence
         tablature_dim_out = self.profile.get_num_dofs() * self.profile.num_pitches
 
-        # Create another output layer to estimate relative pitch deviation
-        if l2_layer:
-            # Train continuous relative pitch layer with MSE loss
-            self.relative_layer = L2LogisticBank(self.tablature_layer.dim_in, tablature_dim_out)
-        else:
-            # Train continuous relative pitch layer with Continuous Bernoulli loss
-            self.relative_layer = CBernoulliBank(self.tablature_layer.dim_in, tablature_dim_out)
+        if self.cont_layer is not None:
+            # Create another output layer to estimate relative pitch deviation
+            if cont_layer:
+                # Train continuous relative pitch layer with MSE loss
+                self.relative_layer = L2LogisticBank(self.tablature_layer.dim_in, tablature_dim_out)
+            else:
+                # Train continuous relative pitch layer with Continuous Bernoulli loss
+                self.relative_layer = CBernoulliBank(self.tablature_layer.dim_in, tablature_dim_out)
 
     def forward(self, feats):
         """
@@ -355,9 +363,12 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
         # Extract the embeddings from the output dictionary (labeled as tablature)
         embeddings = output.pop(tools.KEY_TABLATURE)
 
-        # Process the embeddings with both output layers
+        # Process embeddings with discrete tablature layer
         output[tools.KEY_TABLATURE] = self.tablature_layer(embeddings).pop(tools.KEY_TABLATURE)
-        output[utils.KEY_TABLATURE_REL] = self.relative_layer(embeddings)
+
+        if self.cont_layer is not None:
+            # Process embeddings with relative tablature layer
+            output[utils.KEY_TABLATURE_REL] = self.relative_layer(embeddings)
 
         return output
 
@@ -388,42 +399,43 @@ class TabCNNLogisticContinuous(TabCNNLogistic):
         # TODO - wouldn't need to be this complicated if batch could be deep-copied in this scope
         switch_keys_dict(batch, tools.KEY_TABLATURE, utils.KEY_TABLATURE_ADJ)
 
-        # Obtain the relative pitch deviation estimates
-        relative_est = output[utils.KEY_TABLATURE_REL]
+        if self.cont_layer is not None:
+            # Obtain the relative pitch deviation estimates
+            relative_est = output[utils.KEY_TABLATURE_REL]
 
-        # Unpack the loss if it exists
-        loss = tools.unpack_dict(output, tools.KEY_LOSS)
-        total_loss = 0 if loss is None else loss[tools.KEY_LOSS_TOTAL]
+            # Unpack the loss if it exists
+            loss = tools.unpack_dict(output, tools.KEY_LOSS)
+            total_loss = 0 if loss is None else loss[tools.KEY_LOSS_TOTAL]
 
-        if loss is None:
-            # Create a new dictionary to hold the loss
-            loss = {}
+            if loss is None:
+                # Create a new dictionary to hold the loss
+                loss = {}
 
-        # Check to see if ground-truth relative tablature is available
-        if utils.KEY_TABLATURE_REL in batch.keys():
-            # Normalize the ground-truth relative tablature data (-1, 1)
-            normalized_relative_tablature = batch[utils.KEY_TABLATURE_REL] / self.semitone_radius
-            # Compress the relative tablature data to fit within sigmoid range (0, 1)
-            compressed_relative_tablature = (normalized_relative_tablature + 1) / 2
-            # Compute the loss for the relative pitch deviation
-            relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_tablature)
-            # Add the relative pitch deviation loss to the tracked loss dictionary
-            loss[utils.KEY_LOSS_TABS_REL] = relative_loss
-            # Scale down the current total loss if Continuous Bernoulli layer
-            total_loss /= (self.gamma ** int(not self.l2_layer))
-            # Add the scaled relative pitch deviation loss to the total loss
-            total_loss += (self.gamma ** int(self.l2_layer)) * relative_loss
+            # Check to see if ground-truth relative tablature is available
+            if utils.KEY_TABLATURE_REL in batch.keys():
+                # Normalize the ground-truth relative tablature data (-1, 1)
+                normalized_relative_tablature = batch[utils.KEY_TABLATURE_REL] / self.semitone_radius
+                # Compress the relative tablature data to fit within sigmoid range (0, 1)
+                compressed_relative_tablature = (normalized_relative_tablature + 1) / 2
+                # Compute the loss for the relative pitch deviation
+                relative_loss = self.relative_layer.get_loss(relative_est, compressed_relative_tablature)
+                # Add the relative pitch deviation loss to the tracked loss dictionary
+                loss[utils.KEY_LOSS_TABS_REL] = relative_loss
+                # Scale down the current total loss if Continuous Bernoulli layer
+                total_loss /= (self.gamma ** int(not self.cont_layer))
+                # Add the scaled relative pitch deviation loss to the total loss
+                total_loss += (self.gamma ** int(self.cont_layer)) * relative_loss
 
-        # Determine if loss is being tracked
-        if total_loss:
-            # Add the loss to the output dictionary
-            loss[tools.KEY_LOSS_TOTAL] = total_loss
-            output[tools.KEY_LOSS] = loss
+            # Determine if loss is being tracked
+            if total_loss:
+                # Add the loss to the output dictionary
+                loss[tools.KEY_LOSS_TOTAL] = total_loss
+                output[tools.KEY_LOSS] = loss
 
-        # Normalize relative tablature estimates between (-1, 1)
-        relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
+            # Normalize relative tablature estimates between (-1, 1)
+            relative_est = 2 * self.relative_layer.finalize_output(relative_est) - 1
 
-        # Finalize the estimates by re-scaling to the chosen semitone width
-        output[utils.KEY_TABLATURE_REL] = self.semitone_radius * relative_est
+            # Finalize the estimates by re-scaling to the chosen semitone width
+            output[utils.KEY_TABLATURE_REL] = self.semitone_radius * relative_est
 
         return output

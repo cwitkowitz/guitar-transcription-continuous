@@ -86,8 +86,9 @@ def config():
     # Flag to use rotarized pitch deviations for ground-truth
     rotarize_deviations = False
 
-    # Flag to use MSE loss for continuous output layers instead of Continuous Bernoulli loss
-    l2_layer = True
+    # Switch to select type of continuous output layer for relative pitch prediction
+    # (0 - Continuous Bernoulli | 1 - MSE | None - disable relative pitch prediction)
+    cont_layer = 0
 
     # Multiplier for inhibition loss if applicable
     lmbda = 10
@@ -129,7 +130,7 @@ def config():
 @ex.automain
 def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints, batch_size, learning_rate,
                       gpu_id, reset_data, validation_split, augment_data, semitone_radius, rotarize_deviations,
-                      l2_layer, lmbda, matrix_path, silence_activations, gamma, estimate_onsets, harmonic_dimension,
+                      cont_layer, lmbda, matrix_path, silence_activations, gamma, estimate_onsets, harmonic_dimension,
                       seed, file_layout, root_dir):
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
@@ -314,7 +315,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                               silence_activations=silence_activations,
                               semitone_radius=semitone_radius,
                               gamma=gamma,
-                              l2_layer=l2_layer,
+                              cont_layer=cont_layer,
                               estimate_onsets=estimate_onsets,
                               device=gpu_id)
             fretnet.change_device()
