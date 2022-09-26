@@ -15,8 +15,6 @@ from torch import nn
 
 import math
 
-# TODO - add in onset head with switch?
-
 
 class FretNet(TabCNNLogisticContinuous):
     """
