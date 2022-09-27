@@ -46,7 +46,7 @@ rotarize_deviations = False
 # Flag to re-acquire ground-truth data and re-calculate featues
 reset_data = False
 # Choose the GPU on which to perform evaluation
-gpu_id = 1
+gpu_id = 0
 
 # Initialize a device pointer for loading the models
 device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
@@ -123,11 +123,11 @@ for k in range(6):
                                          multi_pitch_key=tools.KEY_TABLATURE,
                                          multi_pitch_rel_key=utils.KEY_TABLATURE_REL)])
 
-    #if not model.estimate_onsets:
-    # Infer the onsets directly from the multi pitch data
-    validation_estimator.estimators += [
-        # Stacked multi pitch array -> stacked onsets array
-        StackedOnsetsWrapper(profile=model.profile)]
+    if not model.estimate_onsets:
+        # Infer the onsets directly from the multi pitch data
+        validation_estimator.estimators += [
+            # Stacked multi pitch array -> stacked onsets array
+            StackedOnsetsWrapper(profile=model.profile)]
 
     # Initialize the evaluation pipeline - ( Loss,
     validation_evaluator = ComboEvaluator([LossWrapper(),

@@ -1,6 +1,6 @@
 # My imports
 from guitar_transcription_inhibition.models import TabCNNLogistic
-from amt_tools.models import TabCNN, LogisticBank
+from amt_tools.models import TabCNN as _TabCNN, LogisticBank
 from .continuous_layers import CBernoulliBank, L2LogisticBank
 
 import guitar_transcription_continuous.utils as utils
@@ -43,6 +43,47 @@ def switch_keys_dict(d, k1, k2):
         success = True
 
     return success
+
+
+class TabCNN(_TabCNN):
+    """
+    Simple wrapper for TabCNN to use adjusted tablature targets for training.
+    """
+
+    def post_proc(self, batch):
+        """
+        Calculate loss and finalize model output.
+
+        Parameters
+        ----------
+        batch : dict
+          Dictionary including model output and potentially
+          ground-truth for a group of tracks
+
+        Returns
+        ----------
+        output : dict
+          Dictionary containing tablature as well as loss
+        """
+
+        # Switch keys for original and adjusted ground-truth tablature
+        # so tablature loss is computed w.r.t. the adjusted targets
+        switch_keys_dict(batch, tools.KEY_TABLATURE, utils.KEY_TABLATURE_ADJ)
+
+        # Convert the adjusted tablature from logistic to tablature representation
+        batch[tools.KEY_TABLATURE] = tools.logistic_to_tablature(batch[tools.KEY_TABLATURE], self.profile, True)
+
+        # Call the post-processing method of the parent
+        output = super().post_proc(batch)
+
+        # Convert the back the adjusted tablature from tablature to representation
+        batch[tools.KEY_TABLATURE] = tools.tablature_to_logistic(batch[tools.KEY_TABLATURE], self.profile, True)
+
+        # Switch back the keys for proper evaluation of tablature
+        # TODO - wouldn't need to be this complicated if batch could be deep-copied in this scope
+        switch_keys_dict(batch, tools.KEY_TABLATURE, utils.KEY_TABLATURE_ADJ)
+
+        return output
 
 
 class TabCNNLogisticContinuous(TabCNNLogistic):

@@ -187,7 +187,7 @@ class GuitarSetPlus(GuitarSet):
             # Add all relevant ground-truth to the dictionary
             data.update({tools.KEY_FS : fs,
                          tools.KEY_AUDIO : audio,
-                         tools.KEY_TABLATURE: tablature,
+                         tools.KEY_TABLATURE : tablature,
                          utils.KEY_TABLATURE_ADJ : adjusted_multi_pitch,
                          utils.KEY_TABLATURE_REL : relative_multi_pitch,
                          tools.KEY_ONSETS : stacked_onsets})
