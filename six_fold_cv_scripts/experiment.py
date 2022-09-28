@@ -163,9 +163,9 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
 
     if not estimate_onsets:
         # Infer the onsets directly from the multi pitch data
-        validation_estimator.estimators += [
+        validation_estimator.estimators.insert(1,
             # Stacked multi pitch array -> stacked onsets array
-            StackedOnsetsWrapper(profile=profile)]
+            StackedOnsetsWrapper(profile=profile))
 
     # Define tolerances to use when evaluating pitch lists
     tols = [1/2, 1/4, 1/8, 1/16] # semitones

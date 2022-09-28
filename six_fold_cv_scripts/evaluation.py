@@ -125,9 +125,9 @@ for k in range(6):
 
     if not model.estimate_onsets:
         # Infer the onsets directly from the multi pitch data
-        validation_estimator.estimators += [
+        validation_estimator.estimators.insert(1,
             # Stacked multi pitch array -> stacked onsets array
-            StackedOnsetsWrapper(profile=model.profile)]
+            StackedOnsetsWrapper(profile=model.profile))
 
     # Initialize the evaluation pipeline - ( Loss,
     validation_evaluator = ComboEvaluator([LossWrapper(),
