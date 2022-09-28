@@ -98,11 +98,15 @@ def config():
     # Flag to include an activation for silence in applicable output layers
     silence_activations = True
 
+    # Whether to use discrete targets derived from
+    # pitch contours instead of notes for training
+    use_adjusted_targets = True
+
     # Inverse scaling multiplier for discrete tablature / ihibition loss if applicable
     gamma = 10
 
     # Flag to include an additional onset head in FretNet
-    estimate_onsets = True
+    estimate_onsets = False
 
     # Flag to use HCQT features insead of CQT
     harmonic_dimension = True
@@ -129,8 +133,8 @@ def config():
 @ex.automain
 def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints, batch_size, learning_rate,
                       gpu_id, reset_data, validation_split, augment_data, semitone_radius, rotarize_deviations,
-                      cont_layer, lmbda, matrix_path, silence_activations, gamma, estimate_onsets, harmonic_dimension,
-                      seed, file_layout, root_dir):
+                      cont_layer, lmbda, matrix_path, silence_activations, use_adjusted_targets, gamma,
+                      estimate_onsets, harmonic_dimension, seed, file_layout, root_dir):
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
 
@@ -254,6 +258,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                    rotarize_deviations=rotarize_deviations,
                                    augment=augment_data,
                                    silence_activations=silence_activations,
+                                   use_adjusted_targets=use_adjusted_targets,
                                    evaluation_extras=False)
 
             # Create a PyTorch data loader for the dataset

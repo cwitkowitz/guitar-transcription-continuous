@@ -24,7 +24,8 @@ class GuitarSetPlus(GuitarSet):
 
     # TODO - can I remove clutter by making other dataset signatures like this?
     def __init__(self, semitone_radius=0.5, rotarize_deviations=False, augment=False,
-                 silence_activations=False, evaluation_extras=False, **kwargs):
+                 silence_activations=False, evaluation_extras=False, use_adjusted_targets=True,
+                 **kwargs):
         """
         Initialize the dataset variant.
 
@@ -41,6 +42,9 @@ class GuitarSetPlus(GuitarSet):
           Whether to apply pitch shifting data augmentation
         silence_activations : bool
           Whether silent strings are explicitly modeled as activations
+        use_adjusted_targets : bool
+          Whether to use discrete targets derived from
+          pitch contours instead of notes for training
         evaluation_extras : bool
           Whether to compute/load extraneous data (for evaluation)
         """
@@ -49,6 +53,7 @@ class GuitarSetPlus(GuitarSet):
         self.rotarize_deviations = rotarize_deviations
         self.augment = augment
         self.silence_activations = silence_activations
+        self.use_adjusted_targets = use_adjusted_targets
         self.evaluation_extras = evaluation_extras
 
         # Determine if the base directory argument was provided
@@ -164,6 +169,10 @@ class GuitarSetPlus(GuitarSet):
                                                                         minimum_contour_duration=18, # milliseconds
                                                                         attempt_corrections=True,
                                                                         suppress_warnings=True)
+
+            if not self.use_adjusted_targets:
+                # Replace the adjusted discrete targets with the note-derived targets
+                stacked_adjusted_multi_pitch = stacked_multi_pitch
 
             if self.rotarize_deviations:
                 # Obtain a rotary representation of the relative pitch deviations
