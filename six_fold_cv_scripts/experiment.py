@@ -38,7 +38,7 @@ torch.multiprocessing.set_start_method('spawn', force=True)
 
 EX_NAME = '_'.join([FretNet.model_name(),
                     GuitarSet.dataset_name(),
-                    HCQT.features_name()])
+                    HCQT.features_name(), '#'])
 
 ex = Experiment('FretNet w/ HCQT on GuitarSet w/ 6-fold Cross Validation')
 
@@ -71,7 +71,7 @@ def config():
 
     # Flag to re-acquire ground-truth data and re-calculate
     # features (useful if testing out different parameters)
-    reset_data = False
+    reset_data = True
 
     # Flag to set aside one split for validation
     validation_split = True
@@ -98,6 +98,10 @@ def config():
     # Flag to include an activation for silence in applicable output layers
     silence_activations = True
 
+    # Whether to use cluster-based or ground-truth index-
+    # based method for grouping notes and pitch contours
+    use_cluster_grouping = True
+
     # Whether to use discrete targets derived from
     # pitch contours instead of notes for training
     use_adjusted_targets = True
@@ -115,7 +119,7 @@ def config():
     seed = 0
 
     # Switch to manage different file schema (0 - local | 1 - lab machine | 2 - valohai)
-    file_layout = 0
+    file_layout = 2
 
     # Create the root directory for the experiment files
     if file_layout == 2:
@@ -131,9 +135,9 @@ def config():
 
 
 @ex.automain
-def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints, batch_size, learning_rate,
-                      gpu_id, reset_data, validation_split, augment_data, semitone_radius, rotarize_deviations,
-                      cont_layer, lmbda, matrix_path, silence_activations, use_adjusted_targets, gamma,
+def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoints, batch_size, learning_rate, gpu_id,
+                      reset_data, validation_split, augment_data, semitone_radius, rotarize_deviations, cont_layer,
+                      lmbda, matrix_path, silence_activations, use_cluster_grouping, use_adjusted_targets, gamma,
                       estimate_onsets, harmonic_dimension, seed, file_layout, root_dir):
     # Initialize the default guitar profile
     profile = tools.GuitarProfile(num_frets=19)
@@ -258,6 +262,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                    rotarize_deviations=rotarize_deviations,
                                    augment=augment_data,
                                    silence_activations=silence_activations,
+                                   use_cluster_grouping=use_cluster_grouping,
                                    use_adjusted_targets=use_adjusted_targets,
                                    evaluation_extras=False)
 
@@ -284,6 +289,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                   semitone_radius=semitone_radius,
                                   rotarize_deviations=rotarize_deviations,
                                   silence_activations=silence_activations,
+                                  use_cluster_grouping=use_cluster_grouping,
                                   evaluation_extras=True)
 
             if validation_split:
@@ -303,6 +309,7 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                      semitone_radius=semitone_radius,
                                      rotarize_deviations=rotarize_deviations,
                                      silence_activations=silence_activations,
+                                     use_cluster_grouping=use_cluster_grouping,
                                      evaluation_extras=True)
             else:
                 # Perform validation on the testing partition

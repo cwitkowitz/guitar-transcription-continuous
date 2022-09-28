@@ -10,6 +10,8 @@ import librosa
 
 __all__ = [
     'get_note_contour_grouping_by_index',
+    'extract_continuous_multi_pitch_jams',
+    'extract_stacked_continuous_multi_pitch_jams',
     'get_note_contour_grouping_by_interval',
     'get_rotarized_relative_multi_pitch',
     'pitch_list_to_relative_multi_pitch',
@@ -17,7 +19,7 @@ __all__ = [
 ]
 
 
-def get_note_contour_grouping_by_index(jam, times):
+def get_note_contour_grouping_by_index(jam, times, index=None, suppress_warnings=True):
     """
     Parse JAMS data to obtain a grouping between note indices and pitch
     observations based off of the "index" field of each observation.
@@ -29,9 +31,15 @@ def get_note_contour_grouping_by_index(jam, times):
     times : ndarray (N)
       Times in seconds for computing frame indices
       N - number of time samples
+    index : int or None (Optional)
+      Specific index to isolate
+    suppress_warnings : bool
+      Whether to ignore warning messages
 
     Returns
     ----------
+    pitches : ndarray (K)
+      Array of pitches corresponding to dictionary entries
     grouping : (note, [contours]) pairs : dict
       Dictionary containing (note_idx -> [PitchContour]) pairs
     """
@@ -49,18 +57,28 @@ def get_note_contour_grouping_by_index(jam, times):
     # Initialize a note index offset to avoid overlap across slices
     index_offset = 0
 
-    # Initialize a list to keep track of note ordering
+    # Initialize an array/list to keep track of note pitch/ordering
+    note_pitches = np.empty(0)
     note_onset_times = list()
 
     # Estimate the duration from the array of times
     _times = np.append(times, times[-1] + tools.estimate_hop_length(times))
 
-    # Loop through the slices of the stack
-    for slc in range(stack_size):
+    # Obtain a list of all slice indices
+    slices = list(range(stack_size))
+
+    # Check if a specific slice index was chosen
+    if index is not None and index in slices:
+        # Ignore all other slices
+        slices = [index]
+
+    # Loop through the selected slices
+    for slc in slices:
         # Extract the pitch observations of this slice
         slice_pitches = pitch_data_slices[slc]
 
         # Loop through the pitch observations
+        # TODO - might want to load all pitches first, then resample, then create a contour...
         for pitch in slice_pitches:
             # Extract the time, pitch and note index
             time = pitch.time
@@ -75,9 +93,10 @@ def get_note_contour_grouping_by_index(jam, times):
                 freq = 0
 
             if time < np.min(_times) or time > np.max(_times):
-                # There is no corresponding frame index, throw a warning
-                warnings.warn('Ignoring pitch observation outside range '
-                              'of provided times.', category=RuntimeWarning)
+                if not suppress_warnings:
+                    # There is no corresponding frame index, throw a warning
+                    warnings.warn('Ignoring pitch observation outside range '
+                                  'of provided times.', category=RuntimeWarning)
             else:
                 # Determine to which index the observation time corresponds
                 frame_idx = np.argmin(np.abs(_times - time))
@@ -89,7 +108,7 @@ def get_note_contour_grouping_by_index(jam, times):
                     expected_frame_idx = tracked_contour.onset_idx + \
                                          len(tracked_contour.pitch_observations)
                     # Check that the next frame index matches expectations
-                    if frame_idx != expected_frame_idx and freq != 0:
+                    if frame_idx != expected_frame_idx and freq != 0 and not suppress_warnings:
                         # The frame index does not align with expectations, throw a warning
                         warnings.warn('Mismatched expectation for the frame index of the '
                                       'next observation for contour.', category=RuntimeWarning)
@@ -100,22 +119,147 @@ def get_note_contour_grouping_by_index(jam, times):
                     # Create an entry for the new pitch contour
                     grouping[note_idx] = [PitchContour(freq, frame_idx)]
 
-        # Extract the onset times of the notes within this slice
+        # Extract the pitches and onset times of the notes within this slice
+        slice_pitches = [note.value for note in note_data_slices[slc]]
         slice_onset_times = [note.time for note in note_data_slices[slc]]
 
+        # Update the array of note pitches
+        note_pitches = np.append(note_pitches, np.array(slice_pitches))
         # Update the list of onset times
         note_onset_times += slice_onset_times
 
         # Increment the note index offset by the amount of notes added
         index_offset += len(slice_onset_times)
 
+    # Determine the ordering of the notes
+    note_order = np.argsort(note_onset_times)
+
     # Sort the onset times of notes across all slices
-    note_sorting_idcs = np.argsort(np.argsort(note_onset_times))
+    note_sorting_idcs = np.argsort(note_order)
 
     # Update the dictionary keys to reflect the sorting
     grouping = dict(sorted(zip(note_sorting_idcs, grouping.values())))
 
-    return grouping
+    # Update the order of the note pitches based on the sorting
+    note_pitches = note_pitches[note_order]
+
+    return note_pitches, grouping
+
+
+def extract_continuous_multi_pitch_jams(jam, times, profile, index=None, **kwargs):
+    """
+    Extract discretized and relative multi pitch activations
+    from JAMS data containing grouped note and pitch annotations.
+
+    Parameters
+    ----------
+    jam : JAMS object
+      JAMS file data
+    times : ndarray (N)
+      Frame times in seconds
+      N - number of time samples
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
+    index : int or None (Optional)
+      Specific index to isolate
+    **kwargs : N/A
+      Arguments for grouping notes and contours
+
+    Returns
+    ----------
+    relative_multi_pitch : ndarray (F x T)
+      Array of deviations from multiple discrete pitches
+      F - number of discrete pitches
+      T - number of frames
+    adjusted_multi_pitch : ndarray (F x T)
+      Discrete pitch activation map aligned with pitch contours
+      F - number of discrete pitches
+      T - number of frames
+    """
+
+    # Determine the dimensionality for the multi pitch array
+    num_pitches = profile.get_range_len()
+    num_frames = len(times)
+
+    # Initialize two empty multi pitch arrays for relative and adjusted multi pitch data
+    relative_multi_pitch = np.zeros((num_pitches, num_frames))
+    adjusted_multi_pitch = np.zeros((num_pitches, num_frames))
+
+    # Obtain a note-contour grouping by index
+    pitches, grouping = get_note_contour_grouping_by_index(jam, times, index, **kwargs)
+
+    # Round note pitches to nearest semitone and subtract the lowest
+    # supported note of the instrument to obtain pitch indices
+    pitch_idcs = np.round(pitches - profile.low).astype(tools.INT)
+
+    # Loop through each note
+    for i in range(len(pitches)):
+        # Loop through all contours associated with the note
+        for contour in grouping[i]:
+            # Obtain the contour interval
+            onset, offset = contour.get_interval()
+            # Populate the multi pitch array with activations for the note
+            adjusted_multi_pitch[pitch_idcs[i], onset : offset + 1] = 1
+
+            # Compute the deviation between the pitch observations and the nominal value
+            deviations = contour.pitch_observations - round(pitches[i])
+
+            # Populate the multi pitch array with relative deviations for the note
+            relative_multi_pitch[pitch_idcs[i], onset: offset + 1] = deviations
+
+    return relative_multi_pitch, adjusted_multi_pitch
+
+
+def extract_stacked_continuous_multi_pitch_jams(jam, times, profile, **kwargs):
+    """
+    Extract a stack of discretized and relative multi pitch activations
+    from JAMS data containing grouped note and pitch annotations.
+
+    Parameters
+    ----------
+    jam : JAMS object
+      JAMS file data
+    times : ndarray (N)
+      Frame times in seconds
+      N - number of time samples
+    profile : InstrumentProfile (instrument.py)
+      Instrument profile detailing experimental setup
+    **kwargs : N/A
+      Arguments for grouping notes and contours
+
+    Returns
+    ----------
+    stacked_relative_multi_pitch : ndarray (S x F x T)
+      Array of deviations from multiple discrete pitches
+      S - number of slices in stack
+      F - number of discrete pitches
+      T - number of frames
+    stacked_adjusted_multi_pitch : ndarray (S x F x T)
+      Discrete pitch activation map aligned with pitch contours
+      S - number of slices in stack
+      F - number of discrete pitches
+      T - number of frames
+    """
+
+    # Initialize empty lists to hold the stacked multi pitch arrays
+    stacked_relative_multi_pitch = list()
+    stacked_adjusted_multi_pitch = list()
+
+    # Loop through the slices of the collections
+    for i in range(len(jam.annotations[tools.JAMS_NOTE_MIDI])):
+        # Obtain the continuous multi pitch arrays for the notes in this slice
+        relative_multi_pitch, \
+            adjusted_multi_pitch = extract_continuous_multi_pitch_jams(jam, times, profile, i, **kwargs)
+
+        # Add the multi pitch arrays to their respective stacks
+        stacked_relative_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(relative_multi_pitch))
+        stacked_adjusted_multi_pitch.append(tools.multi_pitch_to_stacked_multi_pitch(adjusted_multi_pitch))
+
+    # Collapse the lists into arrays
+    stacked_relative_multi_pitch = np.concatenate(stacked_relative_multi_pitch)
+    stacked_adjusted_multi_pitch = np.concatenate(stacked_adjusted_multi_pitch)
+
+    return stacked_relative_multi_pitch, stacked_adjusted_multi_pitch
 
 
 def get_note_contour_grouping_by_interval(notes, pitch_list, suppress_warnings=True):

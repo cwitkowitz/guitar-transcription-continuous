@@ -23,9 +23,8 @@ class GuitarSetPlus(GuitarSet):
     """
 
     # TODO - can I remove clutter by making other dataset signatures like this?
-    def __init__(self, semitone_radius=0.5, rotarize_deviations=False, augment=False,
-                 silence_activations=False, evaluation_extras=False, use_adjusted_targets=True,
-                 **kwargs):
+    def __init__(self, semitone_radius=0.5, rotarize_deviations=False, augment=False, silence_activations=False,
+                 evaluation_extras=False, use_cluster_grouping=True, use_adjusted_targets=True, **kwargs):
         """
         Initialize the dataset variant.
 
@@ -42,6 +41,9 @@ class GuitarSetPlus(GuitarSet):
           Whether to apply pitch shifting data augmentation
         silence_activations : bool
           Whether silent strings are explicitly modeled as activations
+        use_cluster_grouping : bool
+          Whether to use cluster-based or ground-truth index-
+          based method for grouping notes and pitch contours
         use_adjusted_targets : bool
           Whether to use discrete targets derived from
           pitch contours instead of notes for training
@@ -53,6 +55,7 @@ class GuitarSetPlus(GuitarSet):
         self.rotarize_deviations = rotarize_deviations
         self.augment = augment
         self.silence_activations = silence_activations
+        self.use_cluster_grouping = use_cluster_grouping
         self.use_adjusted_targets = use_adjusted_targets
         self.evaluation_extras = evaluation_extras
 
@@ -159,16 +162,34 @@ class GuitarSetPlus(GuitarSet):
             stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
 
             # Obtain the relative pitch deviation of the contours anchored by string/fret
-            stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
-                utils.stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes,
-                                                                        stacked_pitch_list,
-                                                                        self.profile,
-                                                                        times=times,
-                                                                        semitone_radius=self.semitone_radius,
-                                                                        stream_tolerance=0.4, # semitones
-                                                                        minimum_contour_duration=18, # milliseconds
-                                                                        attempt_corrections=True,
-                                                                        suppress_warnings=True)
+            if self.use_cluster_grouping:
+                # Perform matching with the cluster-based algorithm
+                stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
+                    utils.stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes,
+                                                                            stacked_pitch_list,
+                                                                            self.profile,
+                                                                            times=times,
+                                                                            semitone_radius=self.semitone_radius,
+                                                                            stream_tolerance=0.4, # semitones
+                                                                            minimum_contour_duration=18, # milliseconds
+                                                                            attempt_corrections=True,
+                                                                            suppress_warnings=True)
+            else:
+                # Obtain a list of times associated with pitch list observations
+                _times, _ = tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)
+                # Perform matching with the unmodified ground-truth matching
+                stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
+                    utils.extract_stacked_continuous_multi_pitch_jams(jams_data,
+                                                                      _times,
+                                                                      self.profile,
+                                                                      suppress_warnings=True)
+
+                # Obtain indices to resample the multi pitch arrays
+                resample_idcs = tools.get_resample_idcs(_times, times)
+
+                # Reduce the multi pitch arrays to the resample indices
+                stacked_relative_multi_pitch = stacked_relative_multi_pitch[..., resample_idcs]
+                stacked_adjusted_multi_pitch = stacked_adjusted_multi_pitch[..., resample_idcs]
 
             if not self.use_adjusted_targets:
                 # Replace the adjusted discrete targets with the note-derived targets

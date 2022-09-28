@@ -203,8 +203,14 @@ def streams_to_continuous_multi_pitch(notes, pitch_list, profile, times=None, su
 
     Returns
     ----------
-    grouping : (note, [contours]) pairs : dict
-      Dictionary containing (note_idx -> [PitchContour]) pairs
+    relative_multi_pitch : ndarray (F x T)
+      Array of deviations from multiple discrete pitches
+      F - number of discrete pitches
+      T - number of frames
+    adjusted_multi_pitch : ndarray (F x T)
+      Discrete pitch activation map aligned with pitch contours
+      F - number of discrete pitches
+      T - number of frames
     """
 
     # Unpack the note attributes, removing notes with out-of-bounds nominal pitch
@@ -277,7 +283,7 @@ def stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes, stacked_pit
     profile : InstrumentProfile (instrument.py)
       Instrument profile detailing experimental setup
     **kwargs : N/A
-      Arguments for converting to stream
+      Arguments for grouping notes and contours
 
     Returns
     ----------
@@ -305,7 +311,7 @@ def stacked_streams_to_stacked_continuous_multi_pitch(stacked_notes, stacked_pit
     for i in range(len(stacked_notes_keys)):
         # Extract the key for the current slice in each collection
         key_n, key_pl = stacked_notes_keys[i], stacked_pitch_list_keys[i]
-        # Obtain the note stream multi pitch arrays for the notes in this slice
+        # Obtain the continuous stream multi pitch arrays for the notes in this slice
         relative_multi_pitch, \
             adjusted_multi_pitch = streams_to_continuous_multi_pitch(stacked_notes[key_n],
                                                                      stacked_pitch_list[key_pl],
