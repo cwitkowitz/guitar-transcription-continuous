@@ -175,21 +175,12 @@ class GuitarSetPlus(GuitarSet):
                                                                             attempt_corrections=True,
                                                                             suppress_warnings=True)
             else:
-                # Obtain a list of times associated with pitch list observations
-                _times, _ = tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)
                 # Perform matching with the unmodified ground-truth matching
                 stacked_relative_multi_pitch, stacked_adjusted_multi_pitch = \
                     utils.extract_stacked_continuous_multi_pitch_jams(jams_data,
-                                                                      _times,
+                                                                      times,
                                                                       self.profile,
                                                                       suppress_warnings=True)
-
-                # Obtain indices to resample the multi pitch arrays
-                resample_idcs = tools.get_resample_idcs(_times, times)
-
-                # Reduce the multi pitch arrays to the resample indices
-                stacked_relative_multi_pitch = stacked_relative_multi_pitch[..., resample_idcs]
-                stacked_adjusted_multi_pitch = stacked_adjusted_multi_pitch[..., resample_idcs]
 
             if not self.use_adjusted_targets:
                 # Replace the adjusted discrete targets with the note-derived targets

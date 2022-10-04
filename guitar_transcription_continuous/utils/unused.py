@@ -4,6 +4,8 @@ from .tracking import PitchContour
 import amt_tools.tools as tools
 
 # Regular imports
+from mir_eval.multipitch import resample_multipitch
+
 import numpy as np
 import warnings
 import librosa
@@ -61,9 +63,6 @@ def get_note_contour_grouping_by_index(jam, times, index=None, suppress_warnings
     note_pitches = np.empty(0)
     note_onset_times = list()
 
-    # Estimate the duration from the array of times
-    _times = np.append(times, times[-1] + tools.estimate_hop_length(times))
-
     # Obtain a list of all slice indices
     slices = list(range(stack_size))
 
@@ -77,8 +76,12 @@ def get_note_contour_grouping_by_index(jam, times, index=None, suppress_warnings
         # Extract the pitch observations of this slice
         slice_pitches = pitch_data_slices[slc]
 
+        # Initialize arrays to hold pitch contour information for the slice
+        slice_times = np.empty(0)
+        slice_freqs = np.empty(0)
+        slice_sources = np.empty(0, dtype=int)
+
         # Loop through the pitch observations
-        # TODO - might want to load all pitches first, then resample, then create a contour...
         for pitch in slice_pitches:
             # Extract the time, pitch and note index
             time = pitch.time
@@ -92,44 +95,57 @@ def get_note_contour_grouping_by_index(jam, times, index=None, suppress_warnings
                 # Represent unvoiced frequencies as zero
                 freq = 0
 
-            if time < np.min(_times) or time > np.max(_times):
-                if not suppress_warnings:
-                    # There is no corresponding frame index, throw a warning
-                    warnings.warn('Ignoring pitch observation outside range '
-                                  'of provided times.', category=RuntimeWarning)
-            else:
-                # Determine to which index the observation time corresponds
-                frame_idx = np.argmin(np.abs(_times - time))
+            # Add pitch observation information to the respective arrays
+            slice_times = np.append(slice_times, time)
+            slice_freqs = np.append(slice_freqs, freq)
+            slice_sources = np.append(slice_sources, note_idx)
 
-                if note_idx in grouping:
-                    # Obtain a pointer to the preexisting tracked contour
-                    tracked_contour = grouping[note_idx][0]
-                    # Determine the expected frame index based on what has already been tracked
-                    expected_frame_idx = tracked_contour.onset_idx + \
-                                         len(tracked_contour.pitch_observations)
-                    # Check that the next frame index matches expectations
-                    if frame_idx != expected_frame_idx and freq != 0 and not suppress_warnings:
-                        # The frame index does not align with expectations, throw a warning
-                        warnings.warn('Mismatched expectation for the frame index of the '
-                                      'next observation for contour.', category=RuntimeWarning)
-                    if frame_idx >= expected_frame_idx:
-                        # Add the new pitch observation to the tracked contour
-                        tracked_contour.append_observation(freq)
-                else:
-                    # Create an entry for the new pitch contour
-                    grouping[note_idx] = [PitchContour(freq, frame_idx)]
+        # Loop through all note sources
+        for source in np.unique(slice_sources):
+            # Obtain the time/pitch observations for the note
+            source_times = slice_times[slice_sources == source]
+            source_freqs = slice_freqs[slice_sources == source]
+
+            # Make sure the observations correspond to a uniform time grid
+            source_times, source_freqs = tools.time_series_to_uniform(times=source_times,
+                                                                      values=source_freqs,
+                                                                      duration=jam.file_metadata.duration)
+
+            # Resample the pitch observations to the provided time grid
+            source_freqs = resample_multipitch(source_times, source_freqs, times)
+
+            # Represent the pitch observations for the note source as a 1D array
+            pitch_observations = np.array([p if isinstance(p, float) else 0. for p in source_freqs])
+
+            # Determine which observation index corresponds to the note onset
+            onset_idx = np.where(pitch_observations)[0][0]
+
+            # Remove leading/trailing empty pitch observations
+            pitch_observations = np.trim_zeros(pitch_observations)
+
+            # Check if there are any empty observations
+            if tools.contains_empties_pitch_list(pitch_observations) and not suppress_warnings:
+                # There are some gaps in the observations, throw a warning
+                warnings.warn('Missing pitch observations within contour. ' +
+                              'Will attempt to interpolate gaps.', category=RuntimeWarning)
+
+            # Make sure any missing observations are filled in
+            pitch_observations = tools.interpolate_gaps(pitch_observations)
+
+            # Create a new entry for the note and the extracted pitch list
+            grouping[source] = [PitchContour(pitch_observations, onset_idx)]
 
         # Extract the pitches and onset times of the notes within this slice
-        slice_pitches = [note.value for note in note_data_slices[slc]]
-        slice_onset_times = [note.time for note in note_data_slices[slc]]
+        slice_note_pitches = [note.value for note in note_data_slices[slc]]
+        slice_note_onsets = [note.time for note in note_data_slices[slc]]
 
         # Update the array of note pitches
-        note_pitches = np.append(note_pitches, np.array(slice_pitches))
+        note_pitches = np.append(note_pitches, np.array(slice_note_pitches))
         # Update the list of onset times
-        note_onset_times += slice_onset_times
+        note_onset_times += slice_note_onsets
 
         # Increment the note index offset by the amount of notes added
-        index_offset += len(slice_onset_times)
+        index_offset += len(slice_note_onsets)
 
     # Determine the ordering of the notes
     note_order = np.argsort(note_onset_times)
