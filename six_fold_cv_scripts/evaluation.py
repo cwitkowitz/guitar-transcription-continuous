@@ -2,15 +2,15 @@
 
 # My imports
 from guitar_transcription_continuous.datasets import GuitarSetPlus as GuitarSet
-from guitar_transcription_continuous.estimators import StackedPitchListTablatureWrapper, \
-                                                       StackedNoteTranscriber
+from guitar_transcription_continuous.estimators import StackedPitchListTablatureWrapper
 from guitar_transcription_continuous.evaluators import *
 from amt_tools.features import CQT, HCQT
 
 from amt_tools.transcribe import ComboEstimator, \
                                  TablatureWrapper, \
                                  StackedOnsetsWrapper, \
-                                 StackedOffsetsWrapper
+                                 StackedOffsetsWrapper, \
+                                 StackedNoteTranscriber
 from amt_tools.evaluate import ComboEvaluator, \
                                LossWrapper, \
                                TablatureEvaluator, \
@@ -117,8 +117,7 @@ for k in range(6):
         # Stacked multi pitch array -> stacked offsets array
         StackedOffsetsWrapper(profile=model.profile),
         # Stacked multi pitch array -> stacked notes
-        StackedNoteTranscriber(profile=model.profile,
-                               minimum_duration=0.12),
+        StackedNoteTranscriber(profile=model.profile),
         # Continuous tablature arrays -> stacked pitch list
         StackedPitchListTablatureWrapper(profile=model.profile,
                                          multi_pitch_key=tools.KEY_TABLATURE,
