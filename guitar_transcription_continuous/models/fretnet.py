@@ -217,7 +217,7 @@ class FretNet(TabCNNLogisticContinuous):
 
         if self.estimate_onsets:
             # Process embeddings with onsets head
-            output[tools.KEY_ONSETS] = self.onsets_head(embeddings.clone().detach())
+            output[tools.KEY_ONSETS] = self.onsets_head(embeddings)
 
         return output
 

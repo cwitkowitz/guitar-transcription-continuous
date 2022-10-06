@@ -3,15 +3,15 @@
 # My imports
 from guitar_transcription_continuous.models import TabCNN, TabCNNLogisticContinuous, FretNet
 from guitar_transcription_continuous.datasets import GuitarSetPlus as GuitarSet
-from guitar_transcription_continuous.estimators import StackedPitchListTablatureWrapper
+from guitar_transcription_continuous.estimators import StackedPitchListTablatureWrapper, \
+                                                       StackedNoteTranscriber
 from guitar_transcription_continuous.evaluators import *
 from amt_tools.features import CQT, HCQT
 
 from amt_tools.transcribe import ComboEstimator, \
                                  TablatureWrapper, \
                                  StackedOnsetsWrapper, \
-                                 StackedOffsetsWrapper, \
-                                 StackedNoteTranscriber
+                                 StackedOffsetsWrapper
 from amt_tools.evaluate import ComboEvaluator, \
                                LossWrapper, \
                                TablatureEvaluator, \
@@ -38,7 +38,7 @@ torch.multiprocessing.set_start_method('spawn', force=True)
 
 EX_NAME = '_'.join([FretNet.model_name(),
                     GuitarSet.dataset_name(),
-                    HCQT.features_name(), '#'])
+                    HCQT.features_name(), 'X'])
 
 ex = Experiment('FretNet w/ HCQT on GuitarSet w/ 6-fold Cross Validation')
 
@@ -71,7 +71,7 @@ def config():
 
     # Flag to re-acquire ground-truth data and re-calculate
     # features (useful if testing out different parameters)
-    reset_data = True
+    reset_data = False
 
     # Flag to set aside one split for validation
     validation_split = True
@@ -90,7 +90,7 @@ def config():
     cont_layer = 0
 
     # Multiplier for inhibition loss if applicable
-    lmbda = 10
+    lmbda = 0
 
     # Path to inhibition matrix if applicable
     matrix_path = None
@@ -110,7 +110,7 @@ def config():
     gamma = 10
 
     # Flag to include an additional onset head in FretNet
-    estimate_onsets = False
+    estimate_onsets = True
 
     # Flag to use HCQT features insead of CQT
     harmonic_dimension = True
@@ -163,7 +163,8 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
         # Stacked multi pitch array -> stacked offsets array
         StackedOffsetsWrapper(profile=profile),
         # Stacked multi pitch array -> stacked notes
-        StackedNoteTranscriber(profile=profile),
+        StackedNoteTranscriber(profile=profile,
+                               minimum_duration=0.12),
         # Continuous tablature arrays -> stacked pitch list
         StackedPitchListTablatureWrapper(profile=profile,
                                          multi_pitch_key=tools.KEY_TABLATURE,

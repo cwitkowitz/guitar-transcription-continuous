@@ -2,15 +2,15 @@
 
 # My imports
 from guitar_transcription_continuous.datasets import GuitarSetPlus as GuitarSet
-from guitar_transcription_continuous.estimators import StackedPitchListTablatureWrapper
+from guitar_transcription_continuous.estimators import StackedPitchListTablatureWrapper, \
+                                                       StackedNoteTranscriber
 from guitar_transcription_continuous.evaluators import *
 from amt_tools.features import CQT, HCQT
 
 from amt_tools.transcribe import ComboEstimator, \
                                  TablatureWrapper, \
                                  StackedOnsetsWrapper, \
-                                 StackedOffsetsWrapper, \
-                                 StackedNoteTranscriber
+                                 StackedOffsetsWrapper
 from amt_tools.evaluate import ComboEvaluator, \
                                LossWrapper, \
                                TablatureEvaluator, \
@@ -32,18 +32,18 @@ import os
 
 # Construct the path to the top-level directory of the experiment
 experiment_dir = os.path.join(tools.HOME, 'Desktop', 'guitar-transcription-continuous',
-                              'generated', 'experiments', 'FretNet_GuitarSetPlus_HCQT')
+                              'generated', 'experiments', 'FretNet_GuitarSetPlus_HCQT_X')
 
 # Define the model checkpoints to use for six-fold cross-validation
 checkpoints = [-1, -1, -1, -1, -1, -1]
+# Tag to mark the metric used to choose checkpoints
+identifier = 'string-note-on'
 
 # Number of samples per second of audio
 sample_rate = 22050
 # Number of samples between frames
 hop_length = 512
-# Flag to use rotarized pitch deviations for ground-truth
-rotarize_deviations = False
-# Flag to re-acquire ground-truth data and re-calculate featues
+# Flag to re-acquire ground-truth data and re-calculate features
 reset_data = False
 # Choose the GPU on which to perform evaluation
 gpu_id = 0
@@ -66,7 +66,7 @@ tols = [1/2, 1/4, 1/8, 1/16] # semitones
 # Determine which directory under the experiment corresponds to the latest run
 output_dir = sorted([dir for dir in os.listdir(experiment_dir) if dir.isdigit()])[-1]
 # Specify the path to an output file to log results
-output_path = os.path.join(experiment_dir, output_dir, 'six-fold.json')
+output_path = os.path.join(experiment_dir, output_dir, f'six-fold-{identifier}.json')
 
 # Initialize an empty dictionary to hold the average results across folds
 results = dict()
@@ -117,7 +117,8 @@ for k in range(6):
         # Stacked multi pitch array -> stacked offsets array
         StackedOffsetsWrapper(profile=model.profile),
         # Stacked multi pitch array -> stacked notes
-        StackedNoteTranscriber(profile=model.profile),
+        StackedNoteTranscriber(profile=model.profile,
+                               minimum_duration=0.12),
         # Continuous tablature arrays -> stacked pitch list
         StackedPitchListTablatureWrapper(profile=model.profile,
                                          multi_pitch_key=tools.KEY_TABLATURE,
@@ -176,7 +177,6 @@ for k in range(6):
                           store_data=False,
                           save_loc=gset_cache,
                           semitone_radius=model.semitone_radius,
-                          rotarize_deviations=rotarize_deviations,
                           silence_activations=model.tablature_layer.silence_activations,
                           evaluation_extras=True)
 
