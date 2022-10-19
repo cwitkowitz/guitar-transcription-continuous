@@ -90,7 +90,7 @@ def config():
     cont_layer = 0
 
     # Multiplier for inhibition loss if applicable
-    lmbda = 0
+    lmbda = 10
 
     # Path to inhibition matrix if applicable
     matrix_path = None

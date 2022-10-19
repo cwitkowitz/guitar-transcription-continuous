@@ -105,11 +105,8 @@ class GuitarSetPlus(GuitarSet):
             # Load the original jams data (ignoring validation for speedup)
             jams_data = jams.load(jams_path, validate=False)
 
-            # Load the original notes by string from the JAMS data
-            stacked_notes = tools.extract_stacked_notes_jams(jams_data)
-
-            # Sample a valid semitone shift according to the pre-existing notes in the track
-            semitone_shift = sample_valid_pitch_shift(stacked_notes, self.profile, 5, None, self.rng)
+            # Sample a random integer between -5 and 5 (inclusive) (will be scaled by 0.05)
+            semitone_shift = self.rng.randint(-5, 6)
 
         # Update the track name to reflect any augmentation
         track_ = track + f'_{semitone_shift}' if semitone_shift else track
@@ -139,8 +136,8 @@ class GuitarSetPlus(GuitarSet):
                 # Add the audio to the jams data
                 jams_data = muda.jam_pack(jams_data, _audio=dict(y=audio, sr=fs))
 
-                # Apply a pitch shift transformation to the audio and annotations
-                jams_data = next(muda.deformers.PitchShift(n_semitones=semitone_shift).transform(jams_data))
+                # Apply a pitch shift transformation to the audio and pitch annotations
+                jams_data = next(muda.deformers.PitchShift(n_semitones=0.05*semitone_shift).transform(jams_data))
 
                 # Extract the augmented audio from the JAMS data
                 fs = jams_data.sandbox.muda._audio['sr']
@@ -237,68 +234,3 @@ class GuitarSetPlus(GuitarSet):
                 tools.save_dict_npz(gt_path, data_to_save)
 
         return data
-
-
-def sample_valid_pitch_shift(stacked_notes, profile, steepness=5, max_pitch_shift=None, rng=None):
-    """
-    Sample a random pitch shift that does not violate the instrument profile.
-
-    Parameters
-    ----------
-    stacked_notes : dict
-      Dictionary containing (slice -> (pitches, intervals)) pairs
-    profile : GuitarProfile (instrument.py)
-      Instrument profile detailing experimental setup
-    steepness : float
-      Scaling factor (exponential) for relative weights before normalization
-    max_pitch_shift : int or None (Optional)
-      Maximum allowable pitch shift in either direction
-    rng : NumPy RandomState
-      Random number generator to use for augmentation
-
-    Returns
-    ----------
-    semitone_shift : int
-      Sampled semitone shift within valid range
-    """
-
-    if rng is None:
-        # Default the random state
-        rng = np.random
-
-    # Get the MIDI pitches of the open strings
-    midi_tuning = profile.get_midi_tuning()
-
-    # Determine the minimum and maximum pitch played on each string
-    min_pitches, max_pitches = tools.find_pitch_bounds_stacked_notes(stacked_notes)
-
-    # Default the number of unused frets
-    unused_frets_left = profile.get_num_frets() * np.ones(midi_tuning.shape)
-    unused_frets_right = profile.get_num_frets() * np.ones(midi_tuning.shape)
-
-    # Determine how many frets are unused along both directions of fretboard
-    unused_frets_left[min_pitches != 0] = (min_pitches - midi_tuning)[min_pitches != 0]
-    unused_frets_right[max_pitches != 0] = (midi_tuning - max_pitches)[max_pitches != 0] + profile.get_num_frets()
-
-    # Determine the maximum capo shift in both directions
-    max_shift_down = max(0, np.min(unused_frets_left))
-    max_shift_up = max(0, np.min(unused_frets_right))
-
-    if max_pitch_shift is not None:
-        # Clip the boundaries at the maximum allowable shift
-        max_shift_down = min(max_shift_down, max_pitch_shift)
-        max_shift_up = min(max_shift_up, max_pitch_shift)
-
-    # Construct an array of valid choices for the semitone shift
-    valid_range = np.arange(-max_shift_down, max_shift_up + 1)
-
-    # Obtain relative weights for all choices based on distance from zero
-    relative_weights = (max(max_shift_down, max_shift_up) - np.abs(valid_range) + 1) ** steepness
-
-    # Normalize the weights to obtain probabilities
-    norm_weights = relative_weights / np.sum(relative_weights)
-
-    # Sample a semitone shift within the valid range using the computed probabilities
-    semitone_shift = int(rng.choice(valid_range, p=norm_weights))
-
-    return semitone_shift
