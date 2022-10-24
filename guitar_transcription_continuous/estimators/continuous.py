@@ -182,3 +182,87 @@ class StackedPitchListTablatureWrapper(StackedPitchListWrapper):
                 tools.logistic_to_stacked_multi_pitch(raw_output[self.multi_pitch_rel_key], self.profile, False)
 
         return raw_output
+
+
+class TablatureStreamer(StackedPitchListTablatureWrapper):
+    """
+    TODO
+    """
+
+    def __init__(self, profile, notes_key=None, multi_pitch_key=None,
+                 multi_pitch_rel_key=None, estimates_key=None, save_dir=None):
+        """
+        TODO
+        """
+
+        super().__init__(profile=profile,
+                         multi_pitch_key=multi_pitch_key,
+                         multi_pitch_rel_key=multi_pitch_rel_key,
+                         estimates_key=estimates_key,
+                         save_dir=save_dir)
+
+        # Default the key for unpacking relevant data
+        self.notes_key = tools.KEY_NOTES if notes_key is None else notes_key
+
+    @staticmethod
+    def get_default_key():
+        """
+        Default key for note-contour grouping.
+        """
+
+        return utils.KEY_GROUPING
+
+    def estimate(self, raw_output):
+        """
+        TODO
+        """
+
+        # Obtain the discrete multi pitch activation map
+        stacked_discrete_multi_pitch = tools.unpack_dict(raw_output, self.multi_pitch_key)
+
+        # Obtain the relative multi pitch activation map
+        stacked_relative_multi_pitch = tools.unpack_dict(raw_output, self.multi_pitch_rel_key)
+
+        if stacked_relative_multi_pitch is None:
+            # Default the relative pitch activations to all zeros
+            stacked_relative_multi_pitch = np.zeros(stacked_discrete_multi_pitch.shape)
+
+        # Obtain the stacked note estimates
+        stacked_notes = tools.unpack_dict(raw_output, self.notes_key)
+
+        # Obtain the frame times associated with the activation map
+        times = tools.unpack_dict(raw_output, tools.KEY_TIMES)
+
+        # Determine the number of slices
+        stack_size = len(stacked_notes)
+
+        # Initialize an empty grouping for each slice of notes in the stack
+        # TODO - make this more elegant
+        stacked_grouping = {0 : {}, 1 : {}, 2 : {}, 3 : {}, 4 : {}, 5 : {}}
+
+        # Loop through the slices of the stack
+        for slc in range(stack_size):
+            # Loop through all note predictions in the slice
+            for i, (pitch, interval) in enumerate(zip(*stacked_notes[slc])):
+                # Add back the collapsed dimension
+                pitch, interval = np.array([pitch]), np.array([interval])
+                # Obtain an independent multi pitch array for each note
+                note_multi_pitch = tools.notes_to_multi_pitch(pitch, interval, times, self.profile)
+                # Determine which activations correspond to the note
+                pitch_idcs, time_idcs = np.where(note_multi_pitch)
+                # Extract the relative activations for the note
+                relative_activations = stacked_relative_multi_pitch[slc, pitch_idcs, time_idcs]
+                # Compute the continuous pitches associated with the note
+                continuous_pitches = self.profile.low + pitch_idcs + relative_activations
+                # Create a PitchContour for the observations and add an entry to the grouping
+                # TODO - investigate prediction on final frame
+                stacked_grouping[slc][i] = [utils.PitchContour(continuous_pitches, time_idcs[0])]
+
+        return stacked_grouping
+
+    def write(self, stacked_pitch_list, track):
+        """
+        TODO
+        """
+
+        return NotImplementedError

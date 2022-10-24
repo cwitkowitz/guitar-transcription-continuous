@@ -8,3 +8,5 @@ KEY_TABLATURE_ADJ = 'tablature_adj'
 
 KEY_LOSS_PITCH_REL = 'loss_pitch_rel'
 KEY_LOSS_TABS_REL = 'loss_tabs_rel'
+
+KEY_GROUPING = 'grouping'
