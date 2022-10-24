@@ -81,37 +81,38 @@ def get_note_contour_grouping_by_cluster(notes, pitch_list, semitone_radius=0.5,
     # Initialize an array for the assignment of each contour to a note
     assignment = np.array([-1] * tracker.get_num_contours(), dtype=tools.INT)
 
-    # Loop through each pitch contour's time interval
-    for i, ((start, end), avg) in enumerate(zip(tracker.get_contour_intervals(_times),
-                                                tracker.get_contour_averages(0.25, 0.5))):
-        # Identify points of interest for each contour/note pair
-        left_bound, left_inter = np.minimum(start, intervals[:, 0]), np.maximum(start, intervals[:, 0])
-        right_inter, right_bound = np.minimum(end, intervals[:, 1]), np.maximum(end, intervals[:, 1])
+    if len(pitches):
+        # Loop through each pitch contour's time interval
+        for i, ((start, end), avg) in enumerate(zip(tracker.get_contour_intervals(_times),
+                                                    tracker.get_contour_averages(0.25, 0.5))):
+            # Identify points of interest for each contour/note pair
+            left_bound, left_inter = np.minimum(start, intervals[:, 0]), np.maximum(start, intervals[:, 0])
+            right_inter, right_bound = np.minimum(end, intervals[:, 1]), np.maximum(end, intervals[:, 1])
 
-        # Compute the length in time of the intersections
-        iou = right_inter - left_inter
-        # Set intersection of non-overlapping pairs to zero
-        iou[left_inter >= right_inter] = 0
-        # Divide by the union to produce the IOU of each contour/note pair
-        iou[left_inter < right_inter] /= (right_bound - left_bound)[left_inter < right_inter]
+            # Compute the length in time of the intersections
+            iou = right_inter - left_inter
+            # Set intersection of non-overlapping pairs to zero
+            iou[left_inter >= right_inter] = 0
+            # Divide by the union to produce the IOU of each contour/note pair
+            iou[left_inter < right_inter] /= (right_bound - left_bound)[left_inter < right_inter]
 
-        # Compute pitch proximity scores using exponential distribution with lambda=1
-        pitch_proximities = np.exp(-np.abs(pitches - avg))
+            # Compute pitch proximity scores using exponential distribution with lambda=1
+            pitch_proximities = np.exp(-np.abs(pitches - avg))
 
-        # Point-wise multiply the IOU and pitch proximities to obtain matching scores
-        matching_scores = iou * pitch_proximities
+            # Point-wise multiply the IOU and pitch proximities to obtain matching scores
+            matching_scores = iou * pitch_proximities
 
-        # Determine the note with the highest score and the value of the score
-        max_score, note_idx = np.max(matching_scores), np.argmax(matching_scores)
+            # Determine the note with the highest score and the value of the score
+            max_score, note_idx = np.max(matching_scores), np.argmax(matching_scores)
 
-        if max_score > 0:
-            # Assign the chosen note to the contour
-            assignment[i] = note_idx
-        else:
-            if not suppress_warnings:
-                # Pitch contour cannot be paired with a note, throw a warning
-                warnings.warn('Inferred pitch contour does not ' +
-                              'overlap with any notes.', category=RuntimeWarning)
+            if max_score > 0:
+                # Assign the chosen note to the contour
+                assignment[i] = note_idx
+            else:
+                if not suppress_warnings:
+                    # Pitch contour cannot be paired with a note, throw a warning
+                    warnings.warn('Inferred pitch contour does not ' +
+                                  'overlap with any notes.', category=RuntimeWarning)
 
     # Ignore pitch contours without an assignment
     tracker.filter_contours(assignment != -1)
