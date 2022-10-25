@@ -240,6 +240,9 @@ class TablatureStreamer(StackedPitchListTablatureWrapper):
         # TODO - make this more elegant
         stacked_grouping = {0 : {}, 1 : {}, 2 : {}, 3 : {}, 4 : {}, 5 : {}}
 
+        # Keep track of amount of pre-existing notes for unique index
+        num_offset = 0
+
         # Loop through the slices of the stack
         for slc in range(stack_size):
             # Loop through all note predictions in the slice
@@ -256,7 +259,9 @@ class TablatureStreamer(StackedPitchListTablatureWrapper):
                 continuous_pitches = self.profile.low + pitch_idcs + relative_activations
                 # Create a PitchContour for the observations and add an entry to the grouping
                 # TODO - investigate prediction on final frame
-                stacked_grouping[slc][i] = [utils.PitchContour(continuous_pitches, time_idcs[0])]
+                stacked_grouping[slc][num_offset + i] = [utils.PitchContour(continuous_pitches, time_idcs[0])]
+            # Add the number of notes processed to the
+            num_offset += len(stacked_grouping[slc])
 
         return stacked_grouping
 
