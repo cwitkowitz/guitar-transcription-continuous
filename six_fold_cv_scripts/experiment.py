@@ -119,7 +119,7 @@ def config():
     seed = 0
 
     # Switch to manage different file schema (0 - local | 1 - lab machine | 2 - valohai)
-    file_layout = 2
+    file_layout = 0
 
     # Create the root directory for the experiment files
     if file_layout == 2:
@@ -283,7 +283,6 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                   num_frames=None,
                                   data_proc=data_proc,
                                   profile=profile,
-                                  reset_data=(reset_data and k == 0),
                                   store_data=(not validation_split),
                                   save_loc=gset_cache_val,
                                   semitone_radius=semitone_radius,
@@ -303,7 +302,6 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                                      num_frames=None,
                                      data_proc=data_proc,
                                      profile=profile,
-                                     reset_data=(reset_data and k == 0),
                                      store_data=True,
                                      save_loc=gset_cache_val,
                                      semitone_radius=semitone_radius,
@@ -334,8 +332,13 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
 
             # Initialize a new optimizer for the model parameters
             optimizer = torch.optim.Adam(fretnet.parameters(), lr=learning_rate)
+            # Decay learning rate by 1/2 every 500 iterations
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.5)
 
             print('Training model...')
+
+            # Create a log directory for the training experiment
+            model_dir = os.path.join(root_dir, 'models', 'fold-' + str(k))
 
             # Train the model
             fretnet = train(model=fretnet,
@@ -343,7 +346,8 @@ def fretnet_cross_val(sample_rate, hop_length, num_frames, iterations, checkpoin
                             optimizer=optimizer,
                             iterations=iterations,
                             checkpoints=checkpoints,
-                            log_dir=os.path.join(root_dir, 'models', 'fold-' + str(k)),
+                            log_dir=model_dir,
+                            scheduler=scheduler,
                             val_set=gset_val,
                             estimator=validation_estimator,
                             evaluator=validation_evaluator)
