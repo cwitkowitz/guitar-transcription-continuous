@@ -5,7 +5,7 @@ from guitar_transcription_continuous.visualization import plot_note_contour_asso
 from guitar_transcription_continuous.utils import get_note_contour_grouping_by_cluster, \
                                                   get_note_contour_grouping_by_index
 from guitar_transcription_continuous.estimators import TablatureStreamer
-from amt_tools.features import CQT, HCQT, WaveformWrapper
+from amt_tools.features import CQT, HCQT
 
 from amt_tools.transcribe import ComboEstimator, \
                                  TablatureWrapper, \
@@ -27,17 +27,14 @@ import jams
 import os
 
 
-track = '02_BN1-129-Eb_solo'
-#track = '00_BN1-129-Eb_comp'
+track = '05_Rock1-130-A_solo'
 
-tabcnn_path = '../../generated/experiments/baselines/TabCNN_GuitarSetPlus_CQT_1/models/fold-2/model-7400.pt'
-fretnet_path = '../../generated/experiments/second_insights/FretNet_GuitarSetPlus_HCQT_21/models/fold-2/model-1500.pt'
-#tabcnn_path = '../../generated/experiments/baselines/TabCNN_GuitarSetPlus_CQT_1/models/fold-0/model-4800.pt'
-#fretnet_path = '../../generated/experiments/second_insights/FretNet_GuitarSetPlus_HCQT_21/models/fold-0/model-2000.pt'
+tabcnn_path = os.path.join(tools.HOME, 'Downloads', 'TabCNN', 'models', 'fold-5', 'model-7200.pt')
+fretnet_path = os.path.join(tools.HOME, 'Downloads', 'FretNet', 'models', 'fold-5', 'model-2100.pt')
 
 # Define path to audio and ground-truth
-audio_path = f'/home/rockstar/Desktop/Datasets/GuitarSet/audio_mono-mic/{track}_mic.wav'
-jams_path = f'/home/rockstar/Desktop/Datasets/GuitarSet/annotation/{track}.jams'
+audio_path = os.path.join(tools.HOME, 'Desktop', 'Datasets', 'GuitarSet', 'audio_mono-mic', f'{track}_mic.wav')
+jams_path = os.path.join(tools.HOME, 'Desktop', 'Datasets', 'GuitarSet', 'annotation', f'{track}.jams')
 
 # Feature extraction parameters
 sample_rate = 22050
@@ -50,12 +47,13 @@ gpu_id = 0
 colors = ['#191919', '#00d296', 'gray']
 rcParams['font.family'] = 'monospace'
 rcParams['font.size'] = 20
-time_bounds = [0, 9]#[17.5, 21.1]
+time_bounds = [7.25, 17.75]
 figsize = (10, 8)
 save_figure = True
+cluster_grouping = False
 
 # Construct a path to the base directory for saving visualizations
-save_dir = os.path.join('../..', 'generated', 'visualization', 'comparison')
+save_dir = os.path.join('..', 'generated', 'visualization', 'comparison')
 os.makedirs(save_dir, exist_ok=True)
 
 # Initialize a device pointer for loading the models
@@ -168,11 +166,23 @@ stacked_notes = tools.extract_stacked_notes_jams(jams_data)
 # Collapse the string dimension of the notes
 all_notes = tools.stacked_notes_to_notes(stacked_notes)
 
-# Obtain frame times
-times = WaveformWrapper(sample_rate=sample_rate, hop_length=hop_length).get_times(audio)
+# Load the string-wise pitch annotations from the JAMS data
+stacked_pitch_list = tools.extract_stacked_pitch_list_jams(jams_data)
+stacked_pitch_list = tools.stacked_pitch_list_to_midi(stacked_pitch_list)
+times, pitch_list = tools.stacked_pitch_list_to_pitch_list(stacked_pitch_list)
 
-# Obtain the ground-truth grouping
-_, grouping = get_note_contour_grouping_by_index(jams_data, times)
+if cluster_grouping:
+    # Obtain the ground-truth grouping using the cluster-based methodology
+    grouping = get_note_contour_grouping_by_cluster(all_notes,
+                                                    (times, pitch_list),
+                                                    semitone_radius=1.0,
+                                                    stream_tolerance=0.4, # semitones
+                                                    minimum_contour_duration=18, # milliseconds
+                                                    attempt_corrections=True,
+                                                    suppress_warnings=True)
+else:
+    # Obtain the ground-truth grouping directly from GuitarSet
+    _, grouping = get_note_contour_grouping_by_index(jams_data, times)
 
 # Initialize a new figure for the associations
 fig = tools.initialize_figure(interactive=False, figsize=figsize)

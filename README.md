@@ -1,7 +1,12 @@
 ## Continuous-Valued Guitar Transcription (FretNet)
 Code for the paper "[FretNet: Continuous-Valued Pitch Contour Streaming for Polyphonic Guitar Tablature Transcription](https://arxiv.org/abs/2212.03023)".
 This repository contains scripts which do the following (and more):
-* TODO
+* Implement the proposed continuous-valued (relative) pitch estimation output layer
+* Implement the FretNet model and obtain continuous-valued multi-pitch estimates as described in the paper
+* Compute note and continuous-valued multi-pitch metrics at the string-level using [```mir_eval```](https://github.com/craffel/mir_eval)
+* Perform cluster-based note and pitch contour grouping to cope with noisy ground-truth pitch annotations
+* Perform six-fold cross-validation experiments on [GuitarSet](https://guitarset.weebly.com/)
+* Exemplify how to use FretNet for inference and visualize note-contour grouping 
 
 The repository utilizes [amt-tools](https://github.com/cwitkowitz/amt-tools), a more general music transcription repository, and [guitar-transcription-with-inhibition](https://github.com/cwitkowitz/guitar-transcription-with-inhibition), a repository built for previous research on reformulating and [applying inhibition](https://arxiv.org/abs/2204.08094) to the tablature output layer of [TabCNN](https://archives.ismir.net/ismir2019/paper/000033.pdf).
 
@@ -18,7 +23,7 @@ pip install -e guitar-transcription-continuous/
 TODO
 
 #### Six-Fold Cross-Validation on GuitarSet
-The scripts ```experiment.py``` and ```evaluation.py``` under ```six_fold_cv_scripts``` are also available as a more complete example of how to train and evaluate the proposed model under the six-fold cross-validation schema using [amt-tools](https://github.com/cwitkowitz/amt-tools).
+The scripts ```experiment.py``` and ```evaluation.py``` under ```six_fold_cv_scripts``` are available as a more complete example of how to train and evaluate the proposed model under the six-fold cross-validation schema using [amt-tools](https://github.com/cwitkowitz/amt-tools).
 
 ## Generated Files
 Execution of ```six_fold_cv_scripts/experiment.py``` will generate the following under ```<root_dir>``` (defined at the top of the script):

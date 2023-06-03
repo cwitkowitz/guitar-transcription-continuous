@@ -22,7 +22,6 @@ class GuitarSetPlus(GuitarSet):
     Simple wrapper to additionally include notes and continuous pitch information in ground-truth.
     """
 
-    # TODO - can I remove clutter by making other dataset signatures like this?
     def __init__(self, semitone_radius=0.5, rotarize_deviations=False, augment=False, silence_activations=False,
                  evaluation_extras=False, use_cluster_grouping=True, use_adjusted_targets=True, **kwargs):
         """
